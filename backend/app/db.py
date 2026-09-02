@@ -21,10 +21,16 @@ engine: Engine = create_engine(
 
 @event.listens_for(engine, "connect")
 def _set_sqlite_pragma(dbapi_connection, connection_record) -> None:  # pragma: no cover
-    """Foreign keys are off by default on SQLite; Postgres already enforces them."""
+    """SQLite needs two pragmas that Postgres gives us for free.
+
+    Foreign keys are off by default, and the default lock timeout is zero - which
+    makes a short write from a second connection (the LLM cache, the scheduler)
+    fail instantly instead of waiting its turn.
+    """
     if settings.database_url.startswith("sqlite"):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA busy_timeout=5000")
         cursor.close()
 
 

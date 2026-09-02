@@ -113,9 +113,22 @@ Every LLM call has a non-LLM fallback, so a network failure never breaks a scree
   or to the last cached `insights` row (recomputed at most once every 24 hours)
 - **Campaigns** fall back to template copy and a template visual prompt
 
-`llm/client.py` tries Groq, then Gemini, with a 10-second timeout and two retries, and returns
-`None` rather than raising. Set `GROQ_API_KEY` or `GEMINI_API_KEY` in `backend/.env` to switch the
-copy from template to model-written; nothing else changes.
+`llm/client.py` tries providers in the order given by `LLM_PROVIDER_ORDER` (default `gemini,groq`),
+with a 10-second timeout and two retries, and returns `None` rather than raising. Set
+`GEMINI_API_KEY` or `GROQ_API_KEY` in `backend/.env` to switch the copy from template to
+model-written; nothing else changes.
+
+Built for a free tier, three ways:
+
+- **Batched** - one call drafts up to 20 reminder messages, keyed by customer id. Any id the model
+  omits keeps its template. A nightly run over three stores drafts ~163 messages in 12 calls.
+- **Throttled** - a token bucket (`LLM_RATE_LIMIT_PER_MINUTE`, default 12) sleeps rather than
+  letting the provider throttle us.
+- **Cached** - identical prompts are answered from `llm_cache` for `LLM_CACHE_HOURS`, so the second
+  nightly run makes no network calls at all.
+
+A `429` or quota error backs off exponentially, then falls through to the next provider, then to the
+template. It never surfaces as a 500.
 
 Poster images come from Pollinations (`https://image.pollinations.ai/prompt/...`) - no key, no SDK.
 

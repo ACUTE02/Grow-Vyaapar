@@ -48,6 +48,32 @@ def reminder_prompt(
     )
 
 
+def batch_reminder_prompt(context: StoreContext, items: list[dict[str, Any]]) -> str:
+    """One call, many messages. Free tiers are billed per request, not per word.
+
+    Each item carries its own instruction, facts and a safe fallback line, keyed
+    by customer id. Any id the model omits keeps its template message.
+    """
+    blocks = []
+    for item in items:
+        facts = "; ".join(f"{key}: {value}" for key, value in item["facts"].items())
+        blocks.append(
+            f'- id {item["customer_id"]} | task: {item["instruction"]} | '
+            f'customer: {item["customer_name"]} | facts: {facts} | '
+            f'safe version: "{item["fallback"]}"'
+        )
+    listing = "\n".join(blocks)
+    return (
+        f"{profile_block(context)}\n\n"
+        f"Write one WhatsApp message for EACH of the {len(items)} customers below. "
+        "Each message: at most 240 characters, at most one emoji, no markdown, no "
+        "unfilled placeholders, and only the facts given for that customer.\n\n"
+        f"CUSTOMERS:\n{listing}\n\n"
+        'Reply with JSON only, no prose: {"messages": {"<customer id>": "<message>"}}. '
+        "Use the ids exactly as given."
+    )
+
+
 def insights_prompt(context: StoreContext, metrics: dict[str, Any]) -> str:
     return (
         f"{profile_block(context)}\n\n"

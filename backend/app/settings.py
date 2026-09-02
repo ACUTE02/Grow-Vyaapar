@@ -26,8 +26,21 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.0-flash"
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/models"
 
+    # Providers are tried in this order. Gemini first: generous free tier.
+    llm_provider_order: str = "gemini,groq"
     llm_timeout_seconds: float = 10.0
     llm_max_retries: int = 2
+    llm_rate_limit_per_minute: int = 12
+    llm_cache_hours: int = 24
+    llm_batch_size: int = 20
+
+    @property
+    def provider_order(self) -> list[str]:
+        return [
+            name.strip().lower()
+            for name in (self.llm_provider_order or "").split(",")
+            if name.strip()
+        ] or ["gemini", "groq"]
 
     # Images -----------------------------------------------------------------
     pollinations_base_url: str = "https://image.pollinations.ai/prompt"

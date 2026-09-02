@@ -8,6 +8,7 @@ from app.models.config import (
     StoreConfig,
     Vertical,
 )
+from app.models.ml import LlmCache
 from app.models.core import (
     Batch,
     Customer,
@@ -45,4 +46,5 @@ __all__ = [
     "Campaign",
     "Insight",
     "ChurnScore",
+    "LlmCache",
 ]

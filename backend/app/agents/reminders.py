@@ -30,11 +30,13 @@ from app.models.core import (
     Transaction,
     TransactionItem,
 )
+from app.settings import settings
 from app.verticals.context import StoreContext
 
 logger = logging.getLogger(__name__)
 
 MAX_PER_KIND = 25
+# Budget counts batched calls, not messages: 4 calls x 20 = 80 drafted messages.
 DEFAULT_LLM_BUDGET = 4
 REVIEW_DELAY_HOURS = 2
 
@@ -259,16 +261,14 @@ def _template_for(db: Session, rule: ReminderRule, language: str) -> MessageTemp
     )
 
 
-def draft_message(
+def _fill_template(
     db: Session,
     context: StoreContext,
     rule: ReminderRule,
     customer: Customer,
     facts: dict[str, Any],
-    *,
-    use_llm: bool,
-) -> str:
-    """Template first, LLM as an upgrade. The template is always a valid message."""
+) -> tuple[str, _SafeDict, MessageTemplate | None]:
+    """The message every reminder is guaranteed to have, before any model runs."""
     template = _template_for(db, rule, context.language)
     values = _SafeDict(
         customer_name=customer.name.split()[0],
@@ -283,6 +283,30 @@ def draft_message(
         if template
         else f"Hello {values['customer_name']}, a message from {context.store_name}."
     )
+    return body, values, template
+
+
+def _acceptable(text: str | None, fallback: str) -> str:
+    """A model reply is only used if it is short, filled in and not empty."""
+    if not text:
+        return fallback
+    cleaned = str(text).strip().strip('"')
+    if not cleaned or len(cleaned) > 400 or "{" in cleaned:
+        return fallback
+    return cleaned
+
+
+def draft_message(
+    db: Session,
+    context: StoreContext,
+    rule: ReminderRule,
+    customer: Customer,
+    facts: dict[str, Any],
+    *,
+    use_llm: bool,
+) -> str:
+    """Template first, LLM as an upgrade. The template is always a valid message."""
+    body, values, template = _fill_template(db, context, rule, customer, facts)
 
     if not use_llm or not llm.available():
         return body
@@ -293,13 +317,69 @@ def draft_message(
         fallback_body=body,
         facts=values,
     )
-    text = llm.call(prompt, max_tokens=180)
-    if not text:
-        return body
-    text = text.strip().strip('"')
-    if len(text) > 400 or "{" in text:
-        return body
-    return text
+    return _acceptable(llm.call(prompt, max_tokens=180, db=db), body)
+
+
+def draft_batch(
+    db: Session, context: StoreContext, pending: list[dict[str, Any]], *, budget: int
+) -> None:
+    """Upgrade as many pending messages as the budget allows, in batched calls.
+
+    Each call drafts up to LLM_BATCH_SIZE messages. Any customer id the model
+    omits, or answers badly, keeps the template message already on the entry.
+    A batch never contains the same customer twice, because the reply is keyed
+    by customer id.
+    """
+    if budget <= 0 or not llm.available() or not pending:
+        return
+
+    remaining = [entry for entry in pending if not entry.get("drafted")]
+    batch_size = max(int(settings.llm_batch_size), 1)
+
+    for _ in range(budget):
+        if not remaining:
+            return
+        batch: list[dict[str, Any]] = []
+        seen: set[int] = set()
+        leftover: list[dict[str, Any]] = []
+        for entry in remaining:
+            if len(batch) < batch_size and entry["customer_id"] not in seen:
+                seen.add(entry["customer_id"])
+                batch.append(entry)
+            else:
+                leftover.append(entry)
+        remaining = leftover
+
+        items = [
+            {
+                "customer_id": entry["customer_id"],
+                "customer_name": entry["customer_name"],
+                "instruction": entry["instruction"],
+                "facts": entry["facts"],
+                "fallback": entry["message"],
+            }
+            for entry in batch
+        ]
+        parsed = prompts.parse_json_block(
+            llm.call(
+                prompts.batch_reminder_prompt(context, items),
+                max_tokens=180 * len(items),
+                db=db,
+            )
+        )
+        messages = (parsed or {}).get("messages") if isinstance(parsed, dict) else None
+        if not isinstance(messages, dict):
+            logger.info("Batch draft unusable, %s messages keep their templates", len(batch))
+            for entry in batch:
+                entry["drafted"] = True
+            continue
+
+        by_id = {str(key): value for key, value in messages.items()}
+        for entry in batch:
+            entry["message"] = _acceptable(
+                by_id.get(str(entry["customer_id"])), entry["message"]
+            )
+            entry["drafted"] = True
 
 
 # --------------------------------------------------------------------------- #
@@ -343,7 +423,7 @@ def run(
 
     open_pairs = _open_kinds(db, context.store_id)
     created: dict[str, int] = {}
-    budget = llm_budget
+    pending: list[dict[str, Any]] = []
 
     for rule in rules:
         if kinds and rule.kind not in kinds:
@@ -370,30 +450,44 @@ def run(
             if customer is None or customer.store_id != context.store_id:
                 continue
 
-            use_llm = budget > 0
-            message = draft_message(
-                db, context, rule, customer, candidate.facts, use_llm=use_llm
-            )
-            if use_llm:
-                budget -= 1
-
-            db.add(
-                Reminder(
-                    store_id=context.store_id,
-                    customer_id=customer.id,
-                    rule_id=rule.id,
-                    kind=rule.kind,
-                    channel=rule.channel,
-                    message=message,
-                    status="queued",
-                    scheduled_for=candidate.scheduled_for or utcnow(),
-                )
+            body, _, template = _fill_template(db, context, rule, customer, candidate.facts)
+            pending.append(
+                {
+                    "customer_id": customer.id,
+                    "customer_name": customer.name.split()[0],
+                    "rule": rule,
+                    "kind": rule.kind,
+                    "channel": rule.channel,
+                    "facts": candidate.facts,
+                    "instruction": (
+                        template.llm_instruction if template else "Write a short shop message"
+                    ),
+                    "message": body,
+                    "scheduled_for": candidate.scheduled_for or utcnow(),
+                }
             )
             open_pairs.add((customer.id, rule.kind))
             made += 1
 
         if made:
             created[rule.kind] = created.get(rule.kind, 0) + made
+
+    # One network round trip per batch, not one per customer.
+    draft_batch(db, context, pending, budget=llm_budget)
+
+    for entry in pending:
+        db.add(
+            Reminder(
+                store_id=context.store_id,
+                customer_id=entry["customer_id"],
+                rule_id=entry["rule"].id,
+                kind=entry["kind"],
+                channel=entry["channel"],
+                message=entry["message"],
+                status="queued",
+                scheduled_for=entry["scheduled_for"],
+            )
+        )
 
     db.flush()
     return created

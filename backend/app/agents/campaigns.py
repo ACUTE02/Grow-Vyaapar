@@ -92,6 +92,7 @@ def create(
                     context, occasion=occasion, products=products, segment_counts=segments
                 ),
                 max_tokens=320,
+                db=db,
             )
         )
         if isinstance(parsed, dict) and parsed.get("caption"):
@@ -107,6 +108,7 @@ def create(
         described = llm.call(
             prompts.campaign_image_prompt(context, occasion=occasion, products=products),
             max_tokens=120,
+            db=db,
         )
         if described:
             visual = described.strip().strip('"')[:MAX_PROMPT_CHARS]

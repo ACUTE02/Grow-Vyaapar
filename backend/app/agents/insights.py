@@ -233,7 +233,7 @@ def generate(
     suggestions = template_suggestions(metrics)
 
     if llm.available():
-        text = llm.call(prompts.insights_prompt(context, metrics), max_tokens=700)
+        text = llm.call(prompts.insights_prompt(context, metrics), max_tokens=700, db=db)
         parsed = prompts.parse_json_block(text)
         if isinstance(parsed, dict) and isinstance(parsed.get("suggestions"), list):
             cleaned = [
