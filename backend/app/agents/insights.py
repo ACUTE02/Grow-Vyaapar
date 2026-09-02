@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.agents import segmentation
+from app.agents import forecasting, segmentation
 from app.llm import client as llm
 from app.llm import prompts
 from app.models.agent import Insight
@@ -97,6 +97,18 @@ def compute_metrics(db: Session, context: StoreContext) -> dict[str, Any]:
 
     average_bill = round(this_sales / this_invoices, 2) if this_invoices else 0.0
 
+    # Forward-looking stock facts, so the narrator can talk about what is about
+    # to happen rather than only what already has.
+    forecasts = forecasting.compute(db, context)
+    reorder_cycle = context.cfg_int("reorder_cycle_days", 30)
+    reorder_soon = [
+        item
+        for item in forecasts
+        if item.days_to_stockout is not None and item.days_to_stockout <= reorder_cycle
+    ]
+    predicted_dead = [item for item in forecasts if item.is_dead_stock_risk]
+    predicted_dead.sort(key=lambda item: item.qty_on_hand, reverse=True)
+
     return {
         "store_name": context.store_name,
         "city": context.city,
@@ -135,6 +147,30 @@ def compute_metrics(db: Session, context: StoreContext) -> dict[str, Any]:
             {"category": name, "revenue": _money(revenue)} for name, revenue in top_rows
         ],
         "sales_trend_30d": trend,
+        "forecast_window_days": forecasting.window_days(context),
+        "reorder_soon_count": len(reorder_soon),
+        "reorder_soon": [
+            {
+                "sku": item.sku,
+                "name": item.name,
+                "days_to_stockout": item.days_to_stockout,
+                "daily_velocity": item.predicted_daily_velocity,
+                "suggested_reorder_qty": item.suggested_reorder_qty,
+                "unit": item.unit_label,
+            }
+            for item in reorder_soon[:5]
+        ],
+        "predicted_dead_stock_count": len(predicted_dead),
+        "predicted_dead_stock": [
+            {
+                "sku": item.sku,
+                "name": item.name,
+                "qty_on_hand": item.qty_on_hand,
+                "reason": item.reason,
+                "value": _money(item.qty_on_hand * float(item.predicted_daily_velocity or 0)),
+            }
+            for item in predicted_dead[:5]
+        ],
         "inactive_days_threshold": context.cfg_int("inactive_days", 90),
     }
 
@@ -185,6 +221,21 @@ def template_suggestions(metrics: dict[str, Any]) -> list[dict[str, Any]]:
                 "action": "dead_stock",
             }
         )
+    if metrics.get("reorder_soon") and len(suggestions) < 3:
+        first = metrics["reorder_soon"][0]
+        suggestions.append(
+            {
+                "title": f"{metrics['reorder_soon_count']} SKUs run out within the reorder cycle",
+                "detail": (
+                    f"{first['name']} (SKU {first['sku']}) is selling {first['daily_velocity']:.2f} "
+                    f"{first['unit']} a day and runs out in {first['days_to_stockout']:.0f} days. "
+                    f"Order about {first['suggested_reorder_qty']:g} {first['unit']} now."
+                ),
+                "figure": f"{first['days_to_stockout']:.0f} days of {first['sku']} left",
+                "action": "reorder",
+            }
+        )
+
     inactive = metrics["segments"].get("Inactive", 0)
     if len(suggestions) < 3:
         suggestions.append(

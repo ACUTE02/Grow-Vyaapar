@@ -87,6 +87,7 @@ else:
         "customers": ("Open customers", "pages/customers.py", {}),
         "outbox": ("Open outbox", "pages/outbox.py", {}),
         "campaigns": ("Open campaigns", "pages/campaigns.py", {}),
+        "reorder": ("Open reorder list", "pages/reorder.py", {}),
     }
     for column, suggestion in zip(columns, suggestions):
         with column.container(border=True):
@@ -196,6 +197,28 @@ else:
                              index=["actually stayed", "actually churned"]),
                 use_container_width=True,
             )
+
+# -- forward-looking stock ---------------------------------------------------
+st.subheader("Stock outlook")
+forecast_row = st.columns(4)
+reorder_rows = ui.fetch(
+    "/ml/forecast/stock", {"store_id": store_id, "view": "reorder", "limit": 100}
+) or []
+risk_rows = ui.fetch(
+    "/ml/forecast/stock", {"store_id": store_id, "view": "dead_risk", "limit": 100}
+) or []
+forecast_row[0].metric(f"Reorder within {ctx['config'].get('reorder_cycle_days')} days", len(reorder_rows))
+forecast_row[1].metric("Predicted to go stale", len(risk_rows))
+if reorder_rows:
+    soonest = reorder_rows[0]
+    forecast_row[2].metric(
+        "Runs out first",
+        soonest["sku"],
+        f"{soonest['days_to_stockout']:.0f} days",
+        delta_color="inverse",
+    )
+if forecast_row[3].button("Open reorder list", use_container_width=True):
+    ui.goto("pages/reorder.py")
 
 # -- the two stock lists -----------------------------------------------------
 stock_left, stock_right = st.columns(2, gap="large")

@@ -47,3 +47,21 @@ class ModelRun(Base):
     rows_trained: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     metrics: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     params: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class StockForecast(Base):
+    """One row per product per run of the forecasting agent."""
+
+    __tablename__ = "stock_forecasts"
+    __table_args__ = (
+        Index("ix_stock_forecasts_store_product", "store_id", "product_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+    days_to_stockout: Mapped[float | None] = mapped_column(Numeric(10, 2))
+    predicted_daily_velocity: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False, default=0)
+    suggested_reorder_qty: Mapped[float] = mapped_column(Numeric(12, 3), nullable=False, default=0)
+    is_dead_stock_risk: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    computed_at: Mapped[datetime] = mapped_column(TimeStamp, nullable=False, default=utcnow)

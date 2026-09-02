@@ -56,3 +56,12 @@ class StockForecastOut(BaseModel):
     is_dead_stock_risk: bool
     reason: str
     computed_at: datetime | None = None
+
+
+class ForecastRunOut(BaseModel):
+    store_id: int
+    products: int
+    window_days: int
+    reorder_soon: int
+    dead_stock_risk: int
+    computed_at: datetime

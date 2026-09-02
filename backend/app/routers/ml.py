@@ -1,19 +1,24 @@
 """Model endpoints: train, inspect and act on churn scores."""
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents import churn as churn_agent
+from app.agents import forecasting as forecast_agent
 from app.db import get_db
 from app.models.agent import ChurnScore, Segment
 from app.models.core import Customer
 from app.schemas.ml import (
     ChurnScoreOut,
     ChurnTrainOut,
+    ForecastRunOut,
     ModelRunOut,
     QueueWinbackOut,
+    StockForecastOut,
 )
 from app.services.errors import NotFoundError
 from app.verticals.context import StoreContext, get_store_context_from_query
@@ -188,3 +193,34 @@ def latest_run(
         "metrics": run.metrics,
         "params": run.params,
     }
+
+
+# -- stock intelligence ------------------------------------------------------
+@router.get("/forecast/stock", response_model=list[StockForecastOut])
+def forecast_stock(
+    view: str = Query(
+        default="all", pattern="^(all|reorder|dead_risk)$",
+        description="all | reorder (runs out inside the cycle) | dead_risk",
+    ),
+    limit: int = Query(default=50, ge=1, le=500),
+    context: StoreContext = Depends(get_store_context_from_query),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Velocity, days to stockout and a reorder quantity, per product."""
+    if view == "reorder":
+        rows = forecast_agent.reorder_list(db, context, limit=limit)
+    elif view == "dead_risk":
+        rows = forecast_agent.dead_stock_risk(db, context, limit=limit)
+    else:
+        rows = forecast_agent.compute(db, context)[:limit]
+    return [asdict(row) for row in rows]
+
+
+@router.post("/forecast/run", response_model=ForecastRunOut)
+def forecast_run(
+    context: StoreContext = Depends(get_store_context_from_query),
+    db: Session = Depends(get_db),
+) -> dict:
+    result = forecast_agent.run(db, context)
+    db.commit()
+    return result

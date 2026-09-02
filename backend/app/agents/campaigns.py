@@ -10,7 +10,7 @@ from urllib.parse import quote
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.agents import segmentation
+from app.agents import forecasting, segmentation
 from app.llm import client as llm
 from app.llm import prompts
 from app.models.agent import Campaign
@@ -69,16 +69,29 @@ def create(
     if not occasion.strip():
         raise NotFoundError("An occasion is required to draft a campaign")
 
-    overstocked = stock_service.overstocked(db, context, limit=3)
+    # Stock the forecaster says is about to go stale is better campaign material
+    # than stock that already has: it can still be sold at full price.
     products = [
         {
             "sku": row.sku,
             "name": row.name,
             "qty_on_hand": float(row.qty_on_hand),
-            "days_since_sold": row.days_since_sold,
+            "days_since_sold": None,
+            "why": row.reason,
         }
-        for row in overstocked
+        for row in forecasting.dead_stock_risk(db, context, limit=3)
     ]
+    if not products:
+        products = [
+            {
+                "sku": row.sku,
+                "name": row.name,
+                "qty_on_hand": float(row.qty_on_hand),
+                "days_since_sold": row.days_since_sold,
+                "why": "already past the dead-stock window",
+            }
+            for row in stock_service.overstocked(db, context, limit=3)
+        ]
     segments = segmentation.distribution(db, context.store_id)
 
     caption, hashtags = _fallback_copy(context, occasion, products)

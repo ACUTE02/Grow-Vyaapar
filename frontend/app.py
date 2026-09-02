@@ -89,6 +89,7 @@ if stores:
         st.Page("pages/dashboard.py", title="Dashboard", icon="📊"),
         st.Page("pages/customers.py", title="Customers", icon="👥"),
         st.Page("pages/catalog.py", title="Catalog", icon="📦"),
+        st.Page("pages/reorder.py", title="Reorder", icon="🔮"),
         st.Page("pages/outbox.py", title="Outbox", icon="✉️"),
         st.Page("pages/campaigns.py", title="Campaigns", icon="🎉"),
     ]
