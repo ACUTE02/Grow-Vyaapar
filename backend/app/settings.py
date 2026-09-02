@@ -60,6 +60,14 @@ class Settings(BaseSettings):
     delivery_daily_cap: int = 50
     delivery_rate_limit_per_minute: int = 10
 
+    # Auth ---------------------------------------------------------------------
+    # Enforced in the API, not only hidden in the UI. Turn it off only for local
+    # experiments; the deployed instance must run with it on.
+    auth_enabled: bool = True
+    jwt_secret: str = "change-me-in-env-this-is-not-a-secret"
+    jwt_expiry_minutes: int = 720
+    jwt_cookie_name: str = "localai_token"
+
     # Scheduler --------------------------------------------------------------
     scheduler_enabled: bool = False
     scheduler_hour: int = 2

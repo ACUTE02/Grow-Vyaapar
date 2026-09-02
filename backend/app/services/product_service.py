@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app import audit
 from app.models.core import Product, ProductCategory, StockLevel
 from app.services.errors import ConflictError, NotFoundError, ValidationError
 from app.verticals.context import StoreContext
@@ -51,6 +52,19 @@ def create_category(
     db.add(category)
     db.flush()
     return category
+
+
+def _auditable(product: Product) -> dict[str, Any]:
+    """The fields worth keeping a history of."""
+    return {
+        "sku": product.sku,
+        "name": product.name,
+        "sell_price": str(product.sell_price),
+        "cost_price": str(product.cost_price),
+        "gst_rate": str(product.gst_rate),
+        "is_active": product.is_active,
+        "category_id": product.category_id,
+    }
 
 
 # -- products ---------------------------------------------------------------
@@ -147,6 +161,14 @@ def create_product(db: Session, context: StoreContext, payload: dict[str, Any]) 
         )
     )
     db.flush()
+    audit.record(
+        db,
+        action="product.create",
+        entity="product",
+        entity_id=product.id,
+        store_id=context.store_id,
+        after=_auditable(product),
+    )
     return get_product_out(db, context, product.id)
 
 
@@ -154,6 +176,7 @@ def update_product(
     db: Session, context: StoreContext, product_id: int, payload: dict[str, Any]
 ) -> dict[str, Any]:
     product = get_product(db, context, product_id)
+    before = _auditable(product)
     data = {key: value for key, value in payload.items() if value is not None}
     qty_on_hand = data.pop("qty_on_hand", None)
     reorder_point = data.pop("reorder_point", None)
@@ -181,4 +204,18 @@ def update_product(
             stock.reorder_point = reorder_point
 
     db.flush()
+
+    changed_before, changed_after = audit.diff(before, _auditable(product))
+    if changed_after:
+        audit.record(
+            db,
+            action="product.update",
+            entity="product",
+            entity_id=product.id,
+            store_id=context.store_id,
+            before=changed_before,
+            after=changed_after,
+        )
+        db.flush()
+
     return get_product_out(db, context, product.id)

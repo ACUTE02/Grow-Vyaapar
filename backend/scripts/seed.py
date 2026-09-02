@@ -18,7 +18,17 @@ from sqlalchemy import delete, func, insert, select, text
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal, engine
+from app.models.admin import AuditLog, PurchaseItem, PurchaseOrder, Supplier, User
 from app.models.agent import Campaign, ChurnScore, Insight, Reminder, Segment
+from app.models.commerce import (
+    CampaignStat,
+    Coupon,
+    CouponRedemption,
+    LoyaltyAccount,
+    LoyaltyLedger,
+    Referral,
+)
+from app.models.ml import LlmCache, ModelRun, StockForecast
 from app.models.config import MessageTemplate, ReminderRule, Store, StoreConfig, Vertical
 from app.models.core import (
     Batch,
@@ -75,6 +85,10 @@ HOUR_WEIGHTS = {
 def wipe(db: Session) -> None:
     """Empty every table except verticals, which are upserted by the loader."""
     for model in (
+        AuditLog, CouponRedemption, Coupon, CampaignStat,
+        LoyaltyLedger, LoyaltyAccount, Referral,
+        PurchaseItem, PurchaseOrder, Supplier, User,
+        StockForecast, ModelRun, LlmCache,
         ChurnScore, Insight, Campaign, Reminder, Segment,
         DailySalesSummary, Job, TransactionItem, Transaction,
         Batch, StockLevel, Product, ProductCategory,
@@ -506,16 +520,92 @@ def seed_store(db: Session, rng: random.Random, store: Store, vertical: Vertical
         )
     db.execute(insert(CustomerRecord), record_rows)
 
+    suppliers = seed_suppliers(db, rng, store)
+
     db.flush()
     rebuild_daily_summary(db, store.id, history_start, today)
 
     return {
+        "suppliers": suppliers,
         "customers": len(customer_rows),
         "products": len(product_rows),
         "categories": len(category_rows),
         "transactions": len(txn_rows),
         "items": len(item_rows),
     }
+
+
+# --------------------------------------------------------------------------- #
+# people who can sign in
+# --------------------------------------------------------------------------- #
+DEMO_PASSWORD = "localai123"
+
+
+def seed_users(db: Session) -> None:
+    """One account per role per store, plus a platform owner across all of them.
+
+    The password is the same for every demo account and is printed below - these
+    are throwaway accounts on throwaway data, and the point is that a reviewer
+    can sign in without hunting for credentials.
+    """
+    from app.security import hash_password
+
+    hashed = hash_password(DEMO_PASSWORD)
+    rows = [
+        {
+            "id": 1,
+            "store_id": None,
+            "name": "Platform Owner",
+            "email": "owner@localai.demo",
+            "password_hash": hashed,
+            "role": "owner",
+            "is_active": True,
+            "created_at": datetime(2024, 1, 1, 9, 0, 0),
+        }
+    ]
+    next_id = 2
+    for store in db.scalars(select(Store).order_by(Store.id)).all():
+        slug = store.name.split()[0].lower()
+        for role in ("manager", "cashier"):
+            rows.append(
+                {
+                    "id": next_id,
+                    "store_id": store.id,
+                    "name": f"{store.name} {role.title()}",
+                    "email": f"{role}.{slug}@localai.demo",
+                    "password_hash": hashed,
+                    "role": role,
+                    "is_active": True,
+                    "created_at": datetime(2024, 1, 1, 9, 0, 0),
+                }
+            )
+            next_id += 1
+
+    db.execute(insert(User), rows)
+    db.flush()
+    print(f"  users: {len(rows)} (password for every demo account: {DEMO_PASSWORD})")
+
+
+def seed_suppliers(db: Session, rng: random.Random, store: Store) -> int:
+    names = [
+        f"{city} Wholesale", f"{city} Distributors", f"{city} Trading Co"
+    ] if (city := store.city) else ["Wholesale"]
+    rows = [
+        {
+            "id": (store.id - 1) * 100 + index + 1,
+            "store_id": store.id,
+            "name": name,
+            "phone": f"9{rng.randrange(10**8, 10**9):09d}"[:10],
+            "gstin": None,
+            "address": f"{rng.randrange(1, 200)}, Main Market, {store.city}",
+            "rating": Decimal(str(round(rng.uniform(3.0, 5.0) * 2) / 2)),
+            "notes": None,
+        }
+        for index, name in enumerate(names)
+    ]
+    db.execute(insert(Supplier), rows)
+    db.flush()
+    return len(rows)
 
 
 # --------------------------------------------------------------------------- #
@@ -608,6 +698,7 @@ def main() -> None:
                 + ", ".join(f"{value} {key}" for key, value in stats.items())
             )
 
+        seed_users(db)
         db.commit()
         if not args.quiet:
             report(db)

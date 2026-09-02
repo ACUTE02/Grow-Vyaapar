@@ -17,8 +17,31 @@ from lib import api  # noqa: E402
 st.set_page_config(page_title="LocalAI OS", page_icon="🛒", layout="wide")
 
 
+def _login_screen() -> None:
+    """No token, no app. The same check runs in the API for every request."""
+    st.title("LocalAI OS")
+    st.caption("Sign in to continue.")
+    with st.form("login"):
+        email = st.text_input("Email", value=st.session_state.get("last_email", ""))
+        password = st.text_input("Password", type="password")
+        if st.form_submit_button("Sign in", type="primary"):
+            ok, payload = api.login(email.strip(), password)
+            if ok:
+                st.session_state["token"] = payload["access_token"]
+                st.session_state["user"] = payload["user"]
+                st.session_state["last_email"] = email.strip()
+                api.invalidate()
+                st.rerun()
+            else:
+                st.error(str(payload))
+    st.info(
+        "The demo seed creates one account per store plus a platform owner. "
+        "See the README for the addresses and the demo password."
+    )
+
+
 def _load_stores() -> list[dict] | None:
-    ok, payload = api.stores()
+    ok, payload = api.stores(st.session_state.get("token"))
     if not ok:
         st.sidebar.error(str(payload))
         st.title("LocalAI OS")
@@ -52,7 +75,7 @@ def _sidebar(stores: list[dict]) -> dict | None:
         st.session_state.pop("cart", None)
         api.invalidate()
 
-    ok, context = api.store_context(store_id)
+    ok, context = api.store_context(store_id, st.session_state.get("token"))
     if not ok:
         st.sidebar.error(str(context))
         st.session_state["context"] = None
@@ -62,7 +85,14 @@ def _sidebar(stores: list[dict]) -> dict | None:
     config = context["config"]
     flags = context["feature_flags"]
 
+    user = st.session_state.get("user") or {}
     st.sidebar.caption(f"{context['city']} · {context['vertical_name']}")
+    st.sidebar.caption(f"Signed in as {user.get('name', 'unknown')} ({user.get('role', '?')})")
+    if st.sidebar.button("Sign out"):
+        for key in ("token", "user"):
+            st.session_state.pop(key, None)
+        api.invalidate()
+        st.rerun()
     with st.sidebar.expander("Active configuration", expanded=False):
         st.write(
             {
@@ -78,6 +108,10 @@ def _sidebar(stores: list[dict]) -> dict | None:
 
     return context
 
+
+if not st.session_state.get("token"):
+    _login_screen()
+    st.stop()
 
 stores = _load_stores()
 if stores:
@@ -99,5 +133,9 @@ if stores:
         pages.append(st.Page("pages/jobs.py", title="Jobs", icon="🧵"))
     if flags.get("expiry"):
         pages.append(st.Page("pages/expiry.py", title="Expiry", icon="⏳"))
+
+    # Buying stock is a manager job, so the page only appears for one.
+    if (st.session_state.get("user") or {}).get("role") in ("owner", "manager"):
+        pages.append(st.Page("pages/purchasing.py", title="Purchasing", icon="🚚"))
 
     st.navigation(pages).run()

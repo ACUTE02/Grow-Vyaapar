@@ -48,9 +48,26 @@ def db(engine) -> Iterator[Session]:
         session.close()
 
 
+def _make_user(db: Session, *, role: str, email: str, store_id: int | None = None):
+    """A signed-in identity for the tests. Auth is on by default, as in production."""
+    from app.models.admin import User
+    from app.security import hash_password
+
+    user = User(
+        name=f"Test {role}",
+        email=email,
+        password_hash=hash_password("password123"),
+        role=role,
+        store_id=store_id,
+    )
+    db.add(user)
+    db.commit()
+    return user
+
+
 @pytest.fixture()
-def client(engine, db):
-    """A TestClient whose get_db dependency points at the temp database."""
+def anon_client(engine, db):
+    """A client with no token at all."""
     from fastapi.testclient import TestClient
 
     from app.db import get_db
@@ -69,6 +86,35 @@ def client(engine, db):
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+
+
+def _sign_in(test_client, email: str) -> None:
+    response = test_client.post(
+        "/auth/login", json={"email": email, "password": "password123"}
+    )
+    assert response.status_code == 200, response.text
+    test_client.headers["Authorization"] = f"Bearer {response.json()['access_token']}"
+
+
+@pytest.fixture()
+def client(anon_client, db):
+    """The default client: signed in as an owner who can reach every store."""
+    _make_user(db, role="owner", email="owner@example.com")
+    _sign_in(anon_client, "owner@example.com")
+    return anon_client
+
+
+@pytest.fixture()
+def role_client(anon_client, db):
+    """Factory: sign the client in as a given role, optionally scoped to a store."""
+
+    def _make(role: str, store_id: int | None = None):
+        email = f"{role}-{store_id or 'all'}@example.com"
+        _make_user(db, role=role, email=email, store_id=store_id)
+        _sign_in(anon_client, email)
+        return anon_client
+
+    return _make
 
 
 @pytest.fixture()

@@ -8,6 +8,13 @@ from app.models.config import (
     StoreConfig,
     Vertical,
 )
+from app.models.admin import (
+    AuditLog,
+    PurchaseItem,
+    PurchaseOrder,
+    Supplier,
+    User,
+)
 from app.models.commerce import (
     CampaignStat,
     Coupon,
@@ -63,4 +70,9 @@ __all__ = [
     "LoyaltyAccount",
     "LoyaltyLedger",
     "Referral",
+    "User",
+    "Supplier",
+    "PurchaseOrder",
+    "PurchaseItem",
+    "AuditLog",
 ]
