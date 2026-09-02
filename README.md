@@ -1,18 +1,20 @@
 # LocalAI OS
 
-Billing, inventory and customers for small Indian retail stores, with an autonomous marketing
-agent on top.
+Billing, inventory and customers for small Indian retail stores, with an
+autonomous marketing agent and two machine-learning models on top.
 
-**One codebase runs a kirana store, a chemist and a clothing shop.** They differ only by rows in a
-config table: thresholds, feature flags, product fields, reminder rules and copy tone. There is not
-one `if vertical == ...` anywhere outside `backend/app/verticals/` - a test fails the build if a
-vertical name ever leaks into a service, agent, router or model.
+**One codebase runs a kirana store, a chemist and a clothing shop.** They differ
+only by rows in a config table: thresholds, feature flags, product fields,
+reminder rules, job types, loyalty rates and copy tone. There is no
+`if vertical == ...` anywhere outside `backend/app/verticals/` - a test fails the
+build if a vertical name ever leaks into a service, agent, router or model.
 
-**The marketing agent is autonomous.** It reads what billing and inventory already produce, decides
-who to contact and what to promote, and writes only to its own five tables. Completing a sale is
-itself the trigger - nobody asks it for anything.
+**The marketing agent is autonomous.** It reads what billing and inventory
+already produce, decides who to contact and what to promote, and writes only to
+its own tables. Completing a sale is itself the trigger. It drafts every night -
+and it never sends: delivery is always an explicit human action.
 
-![Data model](docs/er-diagram.png)
+![System architecture](docs/architecture.png)
 
 ---
 
@@ -43,150 +45,192 @@ cd frontend
 streamlit run app.py
 ```
 
-The API is on <http://127.0.0.1:8000> (docs at `/docs`), the app on <http://localhost:8501>.
-No API key is needed for any of this - see "Without an LLM key" below.
+API on <http://127.0.0.1:8000> (`/docs`), app on <http://localhost:8501>.
+Sign in as **`owner@localai.demo`** with password **`localai123`**.
+No LLM key is needed for any of it.
+
+Full click path: **[docs/DEMO.md](docs/DEMO.md)**.
 
 ---
 
-## The four-minute path
+## What it does
 
-Run it once, then switch the store selector to a different vertical and run it again. Nothing is
-restarted and no code changes.
+### Shop keeping
+POS with per-line GST, stock decrement in one transaction, sequential invoice
+numbers and a PDF invoice. Customers with an append-only record log
+(prescriptions, measurements). A catalog whose product fields are defined by the
+vertical. Batches with first-expired-first-out picking and near-expiry alerts
+where the trade needs them. A jobs board for alterations, lens fittings and cake
+orders. Suppliers, purchase orders and receiving stock.
 
-| # | Do this | What proves the point |
-|---|---|---|
-| 1 | **POS** → add items → *Complete sale* | Stock decrements by exactly the sold quantity; the invoice carries this store's unit label (`kg`, `strip`, `piece`) |
-| 2 | Stay on POS | A `review_request` reminder is already queued in the Outbox. Nobody asked for it |
-| 3 | **Outbox** → *Run reminder check* | The kinds produced differ by vertical: a chemist gets `reorder_due`, a clothing shop gets `revisit_due` and `pickup_ready` |
-| 4 | **Dashboard** | Three suggestions, each quoting a figure computed in SQL from the seeded data |
-| 5 | **Campaigns** → type an occasion → *Generate* | A caption, hashtags and a poster image built around the three SKUs that have sat longest |
+### The agent
+| Agent | Decides |
+|---|---|
+| `segmentation` | who is New, Regular, VIP or Inactive, by this store's thresholds |
+| `reminders` | who to contact, why, and in what words |
+| `insights` | the three things worth doing this week, quoting real figures |
+| `campaigns` | what to promote, with a caption and a poster |
+| `churn` | who is about to stop coming - **before** they lapse |
+| `forecasting` | what runs out this cycle, and what is going stale |
+| `attribution` | what the last campaign plausibly earned |
 
-Switching stores also changes: the sidebar configuration panel, the dead-stock window, the
-add-product form fields, the navigation (Jobs and Expiry appear only when that flag is on) and the
-tone of the copy.
+### The models
+- **Churn** - logistic regression per store, self-labelled from history, seeded
+  and reproducible, with the metrics and coefficients in `model_runs` and an
+  honest [model card](docs/model-card-churn.md).
+- **Stock velocity** - a day-of-week weighted moving average. Called that,
+  rather than dressed up as a time-series model.
+
+### The guard rails
+Consent per customer, a hard daily send cap, a rate limit, roles enforced in the
+API rather than hidden in the UI, and an audit row for every mutating request
+with before/after values on the ones that matter.
+
+---
+
+## The proof, in one table
+
+| Claim | Where to check it |
+|---|---|
+| Vertical behaviour is data, not code | `pytest tests/test_vertical_isolation.py` |
+| Configuration is read in exactly one place | `app/verticals/context.py`, used by everything |
+| The same query gives different answers per store | `tests/test_catalog.py::test_dead_stock_uses_each_stores_own_window` |
+| A sale never oversells | `tests/test_billing.py::test_oversell_returns_409_and_changes_nothing` |
+| The agent reacts without being asked | `tests/test_segmentation.py::test_completing_a_sale_creates_a_review_request_with_no_manual_action` |
+| No model output is ever load-bearing | `tests/test_intelligence.py`, `tests/test_llm_client.py` |
+| The churn model does not cheat | `tests/test_churn.py::test_features_ignore_everything_after_the_cutoff` |
+| A cashier cannot create a product by hand | `tests/test_auth.py::test_a_cashier_cannot_create_a_product_even_by_hand` |
+| Lists do not issue a query per row | `tests/test_performance.py` |
+| It runs on Postgres too | `TEST_DATABASE_URL=postgresql+psycopg://... pytest` |
+
+```bash
+cd backend && pytest -q          # 230 tests
+```
 
 ---
 
 ## How the vertical layer works
 
 ```
-app/verticals/definitions/<code>.json     eight files: thresholds, flags, product schema, tone
+app/verticals/definitions/<code>.json     eight files: thresholds, flags, schema, tone
         │  loader.py  (upsert into the verticals table)
         ▼
-verticals + store_config rows             per-store overrides merged over vertical defaults
+verticals + store_config rows             per-store overrides merged over defaults
         │  context.py  (the ONE place config is read)
         ▼
 StoreContext                              handed to every service, router and agent
 ```
 
-A service asks `context.cfg_int("dead_stock_days")`, never "which vertical is this". Adding a ninth
-vertical is one JSON file plus reminder-rule rows - no Python.
+Six extension points, none of them Python: `default_config`, `feature_flags`,
+`product_schema`, `unit_labels`, `prompt_profile`, and `reminder_rules`. Details
+in [docs/architecture.md](docs/architecture.md).
 
-`tests/test_vertical_isolation.py` parses every `.py` under `app/` outside `app/verticals/` and
-fails if any of the eight codes appears in a string literal.
-
-## How the agent works
-
-| Agent | Reads | Writes |
-|---|---|---|
-| `agents/segmentation.py` | transactions, customers | `segments` |
-| `agents/reminders.py` | transactions, jobs, segments, reminder_rules | `reminders` |
-| `agents/insights.py` | transactions, stock, segments | `insights` |
-| `agents/campaigns.py` | stock, segments | `campaigns` |
-| `agents/churn.py` | - | `churn_scores` (phase 2, stub) |
-
-The reminder engine loops over the enabled `reminder_rules` for the store's vertical and evaluates
-the rule's **signal**. It knows six signals - a gap since a category purchase, a gap since any
-visit, a job marked ready, a completed sale, the Inactive segment, a birthday or anniversary. It
-has no idea what a prescription, a batch or an alteration is.
-
-**Python computes every number. The model only writes sentences about numbers it was handed.**
-`agents/insights.py` computes week-over-week change, segment counts and the stock lists in SQL, then
-passes them into the prompt as literal facts.
-
-## Without an LLM key
-
-Every LLM call has a non-LLM fallback, so a network failure never breaks a screen:
-
-- **Reminders** fall back to the `message_templates` row for that rule's `template_key`
-- **Insights** fall back to the same three suggestion slots written by Python from the same figures,
-  or to the last cached `insights` row (recomputed at most once every 24 hours)
-- **Campaigns** fall back to template copy and a template visual prompt
-
-`llm/client.py` tries providers in the order given by `LLM_PROVIDER_ORDER` (default `gemini,groq`),
-with a 10-second timeout and two retries, and returns `None` rather than raising. Set
-`GEMINI_API_KEY` or `GROQ_API_KEY` in `backend/.env` to switch the copy from template to
-model-written; nothing else changes.
-
-Built for a free tier, three ways:
-
-- **Batched** - one call drafts up to 20 reminder messages, keyed by customer id. Any id the model
-  omits keeps its template. A nightly run over three stores drafts ~163 messages in 12 calls.
-- **Throttled** - a token bucket (`LLM_RATE_LIMIT_PER_MINUTE`, default 12) sleeps rather than
-  letting the provider throttle us.
-- **Cached** - identical prompts are answered from `llm_cache` for `LLM_CACHE_HOURS`, so the second
-  nightly run makes no network calls at all.
-
-A `429` or quota error backs off exponentially, then falls through to the next provider, then to the
-template. It never surfaces as a 500.
-
-Poster images come from Pollinations (`https://image.pollinations.ai/prompt/...`) - no key, no SDK.
+Switching the store selector changes: thresholds, the dead-stock and near-expiry
+windows, the add-product form's fields, the unit label on every quantity, which
+reminder kinds fire, which pages appear in the sidebar, the loyalty rate, the job
+types on offer, and the tone of every generated sentence.
 
 ---
 
-## Nightly job
+## Without an LLM key
+
+Every LLM call has a non-LLM fallback, so a network failure never breaks a
+screen:
+
+- **Reminders** fall back to the `message_templates` row for that rule
+- **Insights** fall back to the same three slots written by Python from the same
+  figures, or the last cached row
+- **Campaigns** fall back to template copy and a template visual prompt
+
+`llm/client.py` tries providers in `LLM_PROVIDER_ORDER` (default `gemini,groq`),
+and is built for a free tier:
+
+- **Batched** - one call drafts up to 20 messages keyed by customer id; a
+  nightly run over three stores drafts ~163 messages in 12 calls
+- **Throttled** - a token bucket sleeps rather than getting throttled
+- **Cached** - identical prompts are answered from `llm_cache`, so the second
+  nightly run makes no network calls at all
+- **429-tolerant** - exponential backoff, then the next provider, then the
+  template. It never surfaces as a 500.
+
+Poster images come from Pollinations - no key, no SDK.
+
+---
+
+## Running the pieces
 
 ```bash
 cd backend
-python scheduler.py          # APScheduler, fires at 02:00 Asia/Kolkata
-python scheduler.py --now    # run one pass immediately and exit
+uvicorn app.main:app --reload     # API
+python scheduler.py               # nightly agent run, 02:00 IST
+python scheduler.py --now         # one pass immediately
+python -m scripts.seed            # deterministic demo data
+python -m scripts.rehearse        # walk the demo path, non-zero exit on failure
+python -m scripts.benchmark       # time the real queries
+python -m scripts.backup          # pg_dump or SQLite online backup
+python -m scripts.make_er_diagram # redraw docs/er-diagram.png from the models
+python -m scripts.make_diagrams   # redraw the architecture and flow diagrams
 ```
 
-Per store: rebuild `daily_sales_summary`, resegment, run the reminder rules, refresh insights. It
-calls the same functions the manual buttons call, so the cron and the UI cannot drift apart.
+---
 
-## Tests
+## Documentation
 
-```bash
-cd backend
-pytest -q
-```
+| Document | What is in it |
+|---|---|
+| [docs/DEMO.md](docs/DEMO.md) | the click path, the accounts, a recording shot list |
+| [docs/architecture.md](docs/architecture.md) | the six extension points, layer rules, agent boundaries |
+| [docs/model-card-churn.md](docs/model-card-churn.md) | features, labels, metrics, coefficients, limitations |
+| [docs/performance.md](docs/performance.md) | measured query times, the index before/after, N+1 guards |
+| [docs/deployment.md](docs/deployment.md) | Postgres, Docker, Render, backups, what is verified |
+| [docs/api-guide.md](docs/api-guide.md) | what each of the eleven routers is for |
+| `/docs` on a running API | the generated reference |
 
-Covers vertical isolation, the context resolver, catalog attribute validation, billing arithmetic
-and stock movement, segmentation, the reminder engine, and every LLM fallback path.
+![Data model](docs/er-diagram.png)
+
+---
 
 ## Layout
 
 ```
 backend/app/verticals/   definitions, loader, StoreContext, attribute validation
-backend/app/models/      config.py, core.py, agent.py
-backend/app/services/    billing, stock, invoice PDF, finance rollup, customers, products
-backend/app/agents/      segmentation, reminders, insights, campaigns, churn (stub)
+backend/app/models/      config, core, agent, ml, commerce, admin
+backend/app/services/    billing, stock, batches, jobs, coupons, loyalty,
+                         suppliers, delivery, customers, products, invoice PDF
+backend/app/agents/      segmentation, reminders, insights, campaigns,
+                         churn, forecasting, attribution
 backend/app/llm/         one call(), every prompt in one file
-backend/app/delivery/    console adapter (default), Twilio WhatsApp behind a flag
-backend/scripts/seed.py  three stores, 18 months, fixed seed
-backend/scheduler.py     nightly pass
-frontend/                Streamlit app
+backend/app/delivery/    console (default), Twilio sandbox, WhatsApp Cloud
+backend/app/security.py  bcrypt + JWT       app/middleware.py  roles and audit
+backend/scripts/         seed, rehearse, benchmark, backup, diagrams
+backend/scheduler.py     the nightly pass
+frontend/                Streamlit app, one file per page
 ```
+
+---
 
 ## Configuration
 
-Copy `.env.example` to `backend/.env`. Every value has a working default; the file is only needed
-to point at Postgres or to switch on an LLM.
+Copy `.env.example` to `backend/.env`. Every value has a working default; the
+file is only needed to point at Postgres, switch on an LLM, or deploy.
 
 ```
-DATABASE_URL=sqlite:///./localai.db      # or postgresql+psycopg://user:pass@host/db
-GROQ_API_KEY=                            # optional
-GEMINI_API_KEY=                          # optional
-DELIVERY_ADAPTER=console                 # console | twilio_wa
+DATABASE_URL=sqlite:///./localai.db    # or postgresql+psycopg://...
+AUTH_ENABLED=true                      # enforced in the API, not just the UI
+JWT_SECRET=change-me                   # generate one per environment
+GEMINI_API_KEY=                        # optional
+DELIVERY_ADAPTER=console               # console | twilio_wa | whatsapp_cloud
+DELIVERY_DAILY_CAP=50                  # a bug cannot spam a real person
 ```
 
-The seed is deterministic (`random.seed(42)`): running it twice produces byte-identical data, so a
-figure quoted in a report is the same figure a reviewer sees.
+The seed is deterministic (`random.seed(42)`): running it twice produces
+identical data, so a figure quoted in a report is the figure a reviewer sees.
 
-## Not in this phase
+---
 
-Churn model, stock forecasting, batch and jobs workflows beyond the tables and their read-only
-lists, real WhatsApp/SMS delivery beyond one sandbox message, campaign analytics, coupons, loyalty,
-referrals, auth and roles, employee and supplier modules, chat assistant, review analyzer, mobile
-app, React.
+## Not built, on purpose
+
+Mobile apps, offline sync, multi-tenant billing, auto-posting to Instagram or
+Facebook (campaigns stop at "published"), a chat assistant, review sentiment
+analysis, barcode hardware beyond scanner keyboard input, and anything needing a
+paid API tier.
