@@ -23,7 +23,11 @@ from app.models.base import Base, Money, TimeStamp, utcnow
 
 class Customer(Base):
     __tablename__ = "customers"
-    __table_args__ = (UniqueConstraint("store_id", "phone", name="uq_customer_store_phone"),)
+    __table_args__ = (
+        UniqueConstraint("store_id", "phone", name="uq_customer_store_phone"),
+        Index("ix_customers_family_head", "family_head_id"),
+        Index("ix_customers_store_name", "store_id", "name"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
@@ -56,7 +60,10 @@ class CustomerRecord(Base):
 
 class ProductCategory(Base):
     __tablename__ = "product_categories"
-    __table_args__ = (UniqueConstraint("store_id", "name", name="uq_category_store_name"),)
+    __table_args__ = (
+        UniqueConstraint("store_id", "name", name="uq_category_store_name"),
+        Index("ix_product_categories_parent", "parent_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
@@ -89,6 +96,7 @@ class Product(Base):
 
 class StockLevel(Base):
     __tablename__ = "stock_levels"
+    __table_args__ = (Index("ix_stock_levels_last_sold", "last_sold_at"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False, unique=True)
@@ -143,6 +151,7 @@ class Transaction(Base):
 
 class TransactionItem(Base):
     __tablename__ = "transaction_items"
+    __table_args__ = (Index("ix_txn_items_product_txn", "product_id", "transaction_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     transaction_id: Mapped[int] = mapped_column(
@@ -164,6 +173,10 @@ class Job(Base):
     """Populated only when the jobs feature flag is on for the store."""
 
     __tablename__ = "jobs"
+    __table_args__ = (
+        Index("ix_jobs_transaction", "transaction_id"),
+        Index("ix_jobs_store_status", "store_id", "status"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)

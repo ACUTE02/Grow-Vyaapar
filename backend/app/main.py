@@ -8,11 +8,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.middleware import AuditMiddleware, AuthorizationMiddleware
+from app.observability import RequestIdMiddleware, configure_logging
 from app.services.errors import ConflictError, NotFoundError, ValidationError
 from app.settings import settings
 from app.verticals.context import StoreNotFound
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+configure_logging(json_logs=settings.json_logs, level=getattr(logging, settings.log_level, logging.INFO))
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title=settings.app_name,
@@ -23,10 +25,13 @@ app = FastAPI(
     ),
 )
 
-# Order matters: the audit middleware wraps the authorisation one, so it only
-# ever records requests that were actually allowed through.
+# Order matters. The last one added is the outermost, so a request id exists
+# before anything else runs, and the audit middleware wraps authorisation so it
+# only ever records requests that were actually allowed through.
 app.add_middleware(AuditMiddleware)
 app.add_middleware(AuthorizationMiddleware)
+
+app.add_middleware(RequestIdMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,6 +62,28 @@ async def _validation_handler(_: Request, exc: ValidationError) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={"detail": str(exc), "errors": exc.errors},
+    )
+
+
+@app.exception_handler(Exception)
+async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
+    """The last line: log the detail, tell the caller almost nothing.
+
+    A stack trace in a response body is a gift to an attacker and useless to a
+    shopkeeper. The request id ties the message to the log entry that has it all.
+    """
+    from app.observability import request_id
+
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": (
+                "Something went wrong on our side. Nothing was changed. Quote request "
+                f"id {request_id.get()} if you report this."
+            ),
+            "request_id": request_id.get(),
+        },
     )
 
 

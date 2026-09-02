@@ -1,10 +1,11 @@
 """Customer endpoints. No business logic here - services do the work."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.observability import MAX_LIMIT, set_pagination
 from app.models.core import Customer, CustomerRecord
 from app.schemas.customers import (
     CustomerIn,
@@ -24,14 +25,23 @@ router = APIRouter(prefix="/customers", tags=["customers"])
 def list_customers(
     q: str | None = Query(default=None, description="name or phone fragment"),
     segment: str | None = Query(default=None, description="New | Regular | VIP | Inactive"),
-    limit: int = Query(default=50, ge=1, le=500),
+    limit: int = Query(default=50, ge=1, le=MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
+    response: Response = None,
     context: StoreContext = Depends(get_store_context_from_query),
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    return customer_service.search_customers(
+    rows = customer_service.search_customers(
         db, context, query=q, segment=segment, limit=limit, offset=offset
     )
+    set_pagination(
+        response,
+        total=customer_service.count_customers(db, context, query=q, segment=segment),
+        limit=limit,
+        offset=offset,
+        returned=len(rows),
+    )
+    return rows
 
 
 @router.post("", response_model=CustomerOut, status_code=status.HTTP_201_CREATED)

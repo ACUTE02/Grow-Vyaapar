@@ -4,10 +4,11 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.observability import MAX_LIMIT, set_pagination
 from sqlalchemy import select
 
 from app.models.core import Batch, Product, ProductCategory
@@ -96,12 +97,13 @@ def list_products(
     q: str | None = Query(default=None, description="name or SKU fragment"),
     category_id: int | None = None,
     include_inactive: bool = False,
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=100, ge=1, le=MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
+    response: Response = None,
     context: StoreContext = Depends(get_store_context_from_query),
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    return product_service.search_products(
+    rows = product_service.search_products(
         db,
         context,
         query=q,
@@ -110,6 +112,8 @@ def list_products(
         limit=limit,
         offset=offset,
     )
+    set_pagination(response, total=None, limit=limit, offset=offset, returned=len(rows))
+    return rows
 
 
 @router.post("", response_model=ProductOut, status_code=status.HTTP_201_CREATED)

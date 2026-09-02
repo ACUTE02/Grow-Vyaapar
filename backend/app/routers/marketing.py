@@ -1,8 +1,8 @@
 """Everything the marketing agent owns: segments, outbox, insights, campaigns."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Query, Response, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.agents import attribution as attribution_agent
@@ -11,6 +11,7 @@ from app.agents import insights as insight_agent
 from app.agents import reminders as reminder_agent
 from app.agents import segmentation as segmentation_agent
 from app.db import get_db
+from app.observability import MAX_LIMIT, set_pagination
 from app.delivery.base import get_adapter
 from app.llm import client as llm
 from app.models.agent import Campaign, Reminder, Segment
@@ -52,6 +53,8 @@ def rebuild_segments(
 def list_segments(
     segment: str | None = Query(default=None, description="New | Regular | VIP | Inactive"),
     limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    response: Response = None,
     context: StoreContext = Depends(get_store_context_from_query),
     db: Session = Depends(get_db),
 ) -> list[dict]:
@@ -62,9 +65,10 @@ def list_segments(
     )
     if segment:
         statement = statement.where(Segment.segment == segment)
-    statement = statement.order_by(Segment.total_spend.desc()).limit(limit)
+    total = db.scalar(select(func.count()).select_from(statement.subquery()))
+    statement = statement.order_by(Segment.total_spend.desc()).limit(limit).offset(offset)
 
-    return [
+    rows = [
         {
             "id": row.id,
             "customer_id": row.customer_id,
@@ -78,6 +82,8 @@ def list_segments(
         }
         for row, customer in db.execute(statement).all()
     ]
+    set_pagination(response, total=total, limit=limit, offset=offset, returned=len(rows))
+    return rows
 
 
 @router.get("/segments/summary", response_model=dict)
@@ -114,7 +120,9 @@ def list_reminders(
         default=None, alias="status", description="queued | sent | failed | dismissed"
     ),
     kind: str | None = None,
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=100, ge=1, le=MAX_LIMIT),
+    offset: int = Query(default=0, ge=0),
+    response: Response = None,
     context: StoreContext = Depends(get_store_context_from_query),
     db: Session = Depends(get_db),
 ) -> list[dict]:
@@ -127,9 +135,12 @@ def list_reminders(
         statement = statement.where(Reminder.status == status_filter)
     if kind:
         statement = statement.where(Reminder.kind == kind)
-    statement = statement.order_by(Reminder.created_at.desc()).limit(limit)
+    total = db.scalar(
+        select(func.count()).select_from(statement.subquery())
+    )
+    statement = statement.order_by(Reminder.created_at.desc()).limit(limit).offset(offset)
 
-    return [
+    rows = [
         {
             "id": reminder.id,
             "customer_id": reminder.customer_id,
@@ -146,6 +157,8 @@ def list_reminders(
         }
         for reminder, customer in db.execute(statement).all()
     ]
+    set_pagination(response, total=total, limit=limit, offset=offset, returned=len(rows))
+    return rows
 
 
 @router.post("/reminders/{reminder_id}/send", response_model=ReminderOut)

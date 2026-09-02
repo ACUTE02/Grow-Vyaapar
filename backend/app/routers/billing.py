@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.observability import set_pagination
 from app.models.core import Customer, Product, Transaction, TransactionItem
 from app.schemas.billing import (
     RollupIn,
@@ -97,6 +98,7 @@ def list_transactions(
     limit: int = Query(default=25, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     customer_id: int | None = None,
+    response: Response = None,
     context: StoreContext = Depends(get_store_context_from_query),
     db: Session = Depends(get_db),
 ) -> list[dict]:
@@ -116,9 +118,12 @@ def list_transactions(
     )
     if customer_id:
         statement = statement.where(Transaction.customer_id == customer_id)
+    total = db.scalar(
+        select(func.count(Transaction.id)).where(Transaction.store_id == context.store_id)
+    )
     statement = statement.order_by(Transaction.created_at.desc()).limit(limit).offset(offset)
 
-    return [
+    rows = [
         {
             "id": transaction.id,
             "invoice_no": transaction.invoice_no,
@@ -131,6 +136,8 @@ def list_transactions(
         }
         for transaction, customer_name, item_count in db.execute(statement).all()
     ]
+    set_pagination(response, total=total, limit=limit, offset=offset, returned=len(rows))
+    return rows
 
 
 @router.get("/transactions/{transaction_id}", response_model=TransactionOut)

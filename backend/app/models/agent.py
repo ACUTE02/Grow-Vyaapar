@@ -7,6 +7,7 @@ from decimal import Decimal
 from sqlalchemy import (
     JSON,
     Date,
+    Index,
     Float,
     ForeignKey,
     Integer,
@@ -21,7 +22,10 @@ from app.models.base import Base, Money, TimeStamp, utcnow
 
 class Segment(Base):
     __tablename__ = "segments"
-    __table_args__ = (UniqueConstraint("store_id", "customer_id", name="uq_segment_store_customer"),)
+    __table_args__ = (
+        UniqueConstraint("store_id", "customer_id", name="uq_segment_store_customer"),
+        Index("ix_segments_store_segment", "store_id", "segment"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
@@ -37,6 +41,11 @@ class Segment(Base):
 
 class Reminder(Base):
     __tablename__ = "reminders"
+    __table_args__ = (
+        Index("ix_reminders_rule", "rule_id"),
+        Index("ix_reminders_store_status_kind", "store_id", "status", "kind"),
+        Index("ix_reminders_store_sent", "store_id", "sent_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
@@ -84,6 +93,7 @@ class ChurnScore(Base):
     """One row per customer per scoring run of agents/churn.py."""
 
     __tablename__ = "churn_scores"
+    __table_args__ = (Index("ix_churn_store_risk", "store_id", "risk_level"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)

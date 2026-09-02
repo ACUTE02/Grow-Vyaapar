@@ -55,6 +55,7 @@ class StockForecast(Base):
     __tablename__ = "stock_forecasts"
     __table_args__ = (
         Index("ix_stock_forecasts_store_product", "store_id", "product_id"),
+        Index("ix_stock_forecasts_product", "product_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

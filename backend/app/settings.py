@@ -78,6 +78,10 @@ class Settings(BaseSettings):
 
     timezone: str = "Asia/Kolkata"
 
+    # Observability
+    json_logs: bool = False
+    log_level: str = "INFO"
+
 
 @lru_cache
 def get_settings() -> Settings:

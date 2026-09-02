@@ -73,6 +73,30 @@ def search_customers(
     return rows
 
 
+def count_customers(
+    db: Session,
+    context: StoreContext,
+    *,
+    query: str | None = None,
+    segment: str | None = None,
+) -> int:
+    """The total behind a page, for the X-Total-Count header."""
+    statement = (
+        select(func.count(Customer.id))
+        .select_from(Customer)
+        .outerjoin(Segment, Segment.customer_id == Customer.id)
+        .where(Customer.store_id == context.store_id)
+    )
+    if query:
+        pattern = f"%{query.strip()}%"
+        statement = statement.where(
+            or_(Customer.name.ilike(pattern), Customer.phone.ilike(pattern))
+        )
+    if segment:
+        statement = statement.where(Segment.segment == segment)
+    return int(db.scalar(statement) or 0)
+
+
 def get_customer(db: Session, context: StoreContext, customer_id: int) -> Customer:
     customer = db.get(Customer, customer_id)
     if customer is None or customer.store_id != context.store_id:
