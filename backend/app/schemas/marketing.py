@@ -40,6 +40,7 @@ class ReminderOut(BaseModel):
     status: str
     scheduled_for: datetime | None = None
     sent_at: datetime | None = None
+    provider_response: str | None = None
     created_at: datetime
 
 
@@ -86,3 +87,32 @@ class CampaignOut(BaseModel):
 
 class CampaignStatusIn(BaseModel):
     status: str = Field(pattern="^(draft|saved|published)$")
+
+
+class SendBatchIn(BaseModel):
+    reminder_ids: list[int] = Field(min_length=1, max_length=200)
+
+
+class SendResult(BaseModel):
+    reminder_id: int
+    status: str
+    detail: str | None = None
+
+
+class SendBatchOut(BaseModel):
+    store_id: int
+    adapter: str
+    sent: int
+    failed: int
+    skipped: int
+    cap_remaining: int
+    results: list[SendResult]
+
+
+class DeliveryStatusOut(BaseModel):
+    store_id: int
+    adapter: str
+    daily_cap: int
+    sent_today: int
+    cap_remaining: int
+    rate_limit_per_minute: int

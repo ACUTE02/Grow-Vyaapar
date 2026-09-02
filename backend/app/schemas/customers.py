@@ -17,6 +17,7 @@ class CustomerIn(BaseModel):
     anniversary: date | None = None
     family_head_id: int | None = None
     notes: str | None = None
+    marketing_opt_in: bool = True
 
     @field_validator("phone")
     @classmethod
@@ -35,6 +36,7 @@ class CustomerUpdate(BaseModel):
     anniversary: date | None = None
     family_head_id: int | None = None
     notes: str | None = None
+    marketing_opt_in: bool | None = None
 
 
 class CustomerOut(BaseModel):
@@ -48,6 +50,7 @@ class CustomerOut(BaseModel):
     anniversary: date | None = None
     family_head_id: int | None = None
     notes: str | None = None
+    marketing_opt_in: bool = True
     created_at: datetime
 
 

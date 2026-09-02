@@ -51,6 +51,15 @@ class Settings(BaseSettings):
     twilio_auth_token: str | None = None
     twilio_whatsapp_from: str | None = None
 
+    # Meta WhatsApp Cloud API
+    whatsapp_token: str | None = None
+    whatsapp_phone_number_id: str | None = None
+    whatsapp_api_version: str = "v21.0"
+
+    # Guard rails. A bug must not be able to spam a real person.
+    delivery_daily_cap: int = 50
+    delivery_rate_limit_per_minute: int = 10
+
     # Scheduler --------------------------------------------------------------
     scheduler_enabled: bool = False
     scheduler_hour: int = 2

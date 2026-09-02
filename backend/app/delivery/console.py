@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from app.delivery.base import Adapter
+from app.delivery.base import Adapter, DeliveryResult
 from app.models.agent import Reminder
 
 logger = logging.getLogger(__name__)
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class ConsoleAdapter(Adapter):
     name = "console"
 
-    def send(self, reminder: Reminder) -> str:
+    def send(self, reminder: Reminder) -> DeliveryResult:
         logger.info(
             "[outbox] store=%s customer=%s kind=%s -> %s",
             reminder.store_id,
@@ -20,4 +20,4 @@ class ConsoleAdapter(Adapter):
             reminder.kind,
             reminder.message,
         )
-        return "sent"
+        return DeliveryResult("sent", "console adapter: logged, not actually sent")

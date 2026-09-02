@@ -62,6 +62,7 @@ def search_customers(
                 "anniversary": customer.anniversary,
                 "family_head_id": customer.family_head_id,
                 "notes": customer.notes,
+                "marketing_opt_in": customer.marketing_opt_in,
                 "created_at": customer.created_at,
                 "segment": segment_row.segment if segment_row else None,
                 "recency_days": segment_row.recency_days if segment_row else None,

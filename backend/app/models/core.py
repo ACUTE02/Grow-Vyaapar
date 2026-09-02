@@ -33,6 +33,8 @@ class Customer(Base):
     anniversary: Mapped[date | None] = mapped_column(Date)
     family_head_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
     notes: Mapped[str | None] = mapped_column(Text)
+    # Consent, not an afterthought: the reminder engine skips anyone who is off.
+    marketing_opt_in: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(TimeStamp, nullable=False, default=utcnow)
 
     records: Mapped[list["CustomerRecord"]] = relationship(back_populates="customer")

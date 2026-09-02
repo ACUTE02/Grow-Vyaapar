@@ -24,8 +24,13 @@ from app.schemas.marketing import (
     ReminderRunOut,
     SegmentOut,
     SegmentRebuildOut,
+    SendBatchIn,
+    SendBatchOut,
+    DeliveryStatusOut,
 )
+from app.services import delivery_service
 from app.services.errors import ConflictError, NotFoundError
+from app.settings import settings
 from app.verticals.context import StoreContext, get_store_context_from_query
 
 router = APIRouter(prefix="/marketing", tags=["marketing"])
@@ -135,6 +140,7 @@ def list_reminders(
             "status": reminder.status,
             "scheduled_for": reminder.scheduled_for,
             "sent_at": reminder.sent_at,
+            "provider_response": reminder.provider_response,
             "created_at": reminder.created_at,
         }
         for reminder, customer in db.execute(statement).all()
@@ -155,11 +161,11 @@ def send_reminder(
             f"Reminder {reminder_id} is already {reminder.status} and cannot be sent again"
         )
 
-    reminder.status = get_adapter().send(reminder)
-    if reminder.status == "sent":
-        reminder.sent_at = utcnow()
+    outcome = delivery_service.send_reminders(db, context, [reminder_id])
     db.commit()
     db.refresh(reminder)
+    if outcome.sent == 0 and outcome.failed == 0:
+        raise ConflictError(outcome.results[0]["detail"])
 
     customer = db.get(Customer, reminder.customer_id)
     return {
@@ -174,6 +180,41 @@ def send_reminder(
         "scheduled_for": reminder.scheduled_for,
         "sent_at": reminder.sent_at,
         "created_at": reminder.created_at,
+    }
+
+
+@router.post("/reminders/send", response_model=SendBatchOut)
+def send_selected(
+    payload: SendBatchIn,
+    context: StoreContext = Depends(get_store_context_from_query),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Send an explicitly chosen set. Never called by the scheduler (rule 10)."""
+    outcome = delivery_service.send_reminders(db, context, payload.reminder_ids)
+    db.commit()
+    return {
+        "store_id": context.store_id,
+        "adapter": get_adapter().name,
+        "sent": outcome.sent,
+        "failed": outcome.failed,
+        "skipped": outcome.skipped,
+        "cap_remaining": outcome.cap_remaining,
+        "results": outcome.results,
+    }
+
+
+@router.get("/delivery/status", response_model=DeliveryStatusOut)
+def delivery_status(
+    context: StoreContext = Depends(get_store_context_from_query),
+    db: Session = Depends(get_db),
+) -> dict:
+    return {
+        "store_id": context.store_id,
+        "adapter": get_adapter().name,
+        "daily_cap": settings.delivery_daily_cap,
+        "sent_today": delivery_service.sent_today(db, context.store_id),
+        "cap_remaining": delivery_service.cap_remaining(db, context.store_id),
+        "rate_limit_per_minute": settings.delivery_rate_limit_per_minute,
     }
 
 

@@ -477,6 +477,8 @@ def run(
             customer = db.get(Customer, candidate.customer_id)
             if customer is None or customer.store_id != context.store_id:
                 continue
+            if not customer.marketing_opt_in:
+                continue          # consent is checked before a message is drafted
 
             body, _, template = _fill_template(db, context, rule, customer, candidate.facts)
             pending.append(
@@ -553,7 +555,7 @@ def on_transaction_completed(
         return already
 
     customer = db.get(Customer, transaction.customer_id)
-    if customer is None:
+    if customer is None or not customer.marketing_opt_in:
         return None
 
     message = draft_message(

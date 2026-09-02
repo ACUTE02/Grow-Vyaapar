@@ -48,6 +48,8 @@ class Reminder(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued", index=True)
     scheduled_for: Mapped[datetime | None] = mapped_column(TimeStamp)
     sent_at: Mapped[datetime | None] = mapped_column(TimeStamp)
+    # Whatever the provider said, success or failure, kept verbatim.
+    provider_response: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(TimeStamp, nullable=False, default=utcnow)
 
     customer: Mapped["object"] = relationship("Customer")
@@ -79,7 +81,7 @@ class Insight(Base):
 
 
 class ChurnScore(Base):
-    """Phase 2. The table exists now and stays empty."""
+    """One row per customer per scoring run of agents/churn.py."""
 
     __tablename__ = "churn_scores"
 

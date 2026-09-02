@@ -46,8 +46,15 @@ else:
     frame = pd.DataFrame(customers)
     frame["total_spend"] = frame["total_spend"].fillna(0).map(ui.money)
     st.dataframe(
-        frame[["name", "phone", "segment", "recency_days", "visits", "total_spend"]].rename(
-            columns={"recency_days": "days since visit", "total_spend": "lifetime spend"}
+        frame[
+            ["name", "phone", "segment", "recency_days", "visits", "total_spend",
+             "marketing_opt_in"]
+        ].rename(
+            columns={
+                "recency_days": "days since visit",
+                "total_spend": "lifetime spend",
+                "marketing_opt_in": "messages ok",
+            }
         ),
         hide_index=True,
         use_container_width=True,
@@ -64,6 +71,26 @@ else:
     detail_left, detail_right = st.columns([2, 3], gap="large")
 
     with detail_left:
+        current = next(c for c in customers if c["id"] == chosen)
+        st.subheader("Consent")
+        opted_in = st.toggle(
+            "Send marketing messages to this customer",
+            value=bool(current.get("marketing_opt_in", True)),
+            key=f"consent_{chosen}",
+        )
+        if opted_in != bool(current.get("marketing_opt_in", True)):
+            ok, payload = api.patch(
+                f"/customers/{chosen}",
+                params={"store_id": store_id},
+                json={"marketing_opt_in": opted_in},
+            )
+            st.toast("Consent updated" if ok else str(payload))
+            st.rerun()
+        st.caption(
+            "An opted-out customer is skipped when messages are drafted, and refused "
+            "again at send time."
+        )
+
         st.subheader("Recent bills")
         bills = ui.fetch(
             "/billing/transactions",
