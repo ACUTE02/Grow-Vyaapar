@@ -14,7 +14,7 @@ from app.schemas.customers import (
     CustomerRecordOut,
     CustomerUpdate,
 )
-from app.services import customer_service
+from app.services import customer_service, loyalty_service
 from app.verticals.context import StoreContext, get_store_context_from_query
 
 router = APIRouter(prefix="/customers", tags=["customers"])
@@ -40,7 +40,11 @@ def create_customer(
     context: StoreContext = Depends(get_store_context_from_query),
     db: Session = Depends(get_db),
 ) -> Customer:
-    customer = customer_service.create_customer(db, context, payload.model_dump())
+    data = payload.model_dump()
+    referral_code = data.pop("referral_code", None)
+    customer = customer_service.create_customer(db, context, data)
+    if referral_code:
+        loyalty_service.claim_referral(db, context, referral_code, customer.id)
     db.commit()
     db.refresh(customer)
     return customer

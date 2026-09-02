@@ -21,7 +21,10 @@
       "repair",
       "installation",
       "warranty claim"
-    ]
+    ],
+    "loyalty_rupees_per_point": 500,
+    "loyalty_point_value": 1,
+    "referral_reward_points": 50
   },
   "feature_flags": {
     "expiry": false,

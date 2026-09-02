@@ -91,6 +91,33 @@ else:
             "again at send time."
         )
 
+        st.subheader("Loyalty")
+        loyalty = ui.fetch(f"/loyalty/customers/{chosen}", {"store_id": store_id})
+        if loyalty:
+            points = st.columns(2)
+            points[0].metric("Points", loyalty["points_balance"])
+            points[1].metric("Lifetime", loyalty["lifetime_points"])
+            st.caption(
+                f"One point per {ui.money(loyalty['rupees_per_point'])} spent, worth "
+                f"{ui.money(loyalty['point_value'])} at the counter. The balance is the "
+                "sum of the ledger, never edited on its own."
+            )
+            if loyalty["ledger"]:
+                with st.expander("Points ledger"):
+                    st.dataframe(
+                        pd.DataFrame(loyalty["ledger"])[
+                            ["created_at", "points_delta", "reason", "transaction_id"]
+                        ],
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+        if st.button("Issue referral code"):
+            ok, payload = api.post(f"/loyalty/referrals/{chosen}", params={"store_id": store_id})
+            if ok:
+                st.success(f"Referral code: {payload['code']}")
+            else:
+                ui.error_state(str(payload))
+
         st.subheader("Recent bills")
         bills = ui.fetch(
             "/billing/transactions",

@@ -80,3 +80,32 @@ else:
                         st.toast(f"Marked {next_status}" if ok else str(payload))
                         st.rerun()
                 st.caption(f"Status: {campaign['status']} · created {campaign['created_at'][:16]}")
+
+                with st.expander("Coupon for this campaign"):
+                    coupon_columns = st.columns([2, 2, 2])
+                    kind = coupon_columns[0].selectbox(
+                        "Type", ["percent", "flat"], key=f"ctype_{campaign['id']}"
+                    )
+                    value = coupon_columns[1].number_input(
+                        "Value", min_value=1.0, value=20.0, step=5.0,
+                        key=f"cvalue_{campaign['id']}",
+                    )
+                    cap = coupon_columns[2].number_input(
+                        "Max redemptions", min_value=1, value=100, step=10,
+                        key=f"ccap_{campaign['id']}",
+                    )
+                    if st.button("Create coupon", key=f"coupon_{campaign['id']}"):
+                        ok, payload = api.post(
+                            "/loyalty/coupons",
+                            params={"store_id": store_id},
+                            json={
+                                "campaign_id": campaign["id"],
+                                "discount_type": kind,
+                                "discount_value": value,
+                                "max_redemptions": int(cap),
+                            },
+                        )
+                        if ok:
+                            st.success(f"Coupon {payload['code']} is live at the counter")
+                        else:
+                            ui.error_state(str(payload))

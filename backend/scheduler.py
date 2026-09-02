@@ -15,8 +15,11 @@ from datetime import date, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy import select
 
+from app.agents import attribution as attribution_agent
+from app.agents import forecasting as forecast_agent
 from app.agents import insights as insight_agent
 from app.agents import reminders as reminder_agent
+from app.agents import churn as churn_agent
 from app.agents import segmentation as segmentation_agent
 from app.db import SessionLocal
 from app.models.config import Store
@@ -29,7 +32,11 @@ logger = logging.getLogger("scheduler")
 
 
 def nightly_pass() -> dict[str, dict]:
-    """Roll up finance, resegment, run reminders and refresh insights, per store."""
+    """One pass per store: roll up finance, resegment, rescore churn, forecast
+    stock, run the reminder rules, attribute campaigns and refresh insights.
+
+    It never sends anything. Delivery stays an explicit human action (rule 10).
+    """
     report: dict[str, dict] = {}
     with SessionLocal() as db:
         store_ids = list(db.scalars(select(Store.id).order_by(Store.id)).all())
@@ -44,6 +51,9 @@ def nightly_pass() -> dict[str, dict]:
                 )
                 distribution = segmentation_agent.rebuild(db, context)
                 created = reminder_agent.run(db, context)
+                forecast = forecast_agent.run(db, context)
+                churn_agent.score_store(db, context)
+                attribution = attribution_agent.run(db, context)
                 _, source = insight_agent.generate(db, context, force=True)
                 db.commit()
             except Exception:
@@ -57,6 +67,9 @@ def nightly_pass() -> dict[str, dict]:
             "summary_days": len(days),
             "segments": distribution,
             "reminders": created,
+            "forecasts": forecast["products"],
+            "reorder_soon": forecast["reorder_soon"],
+            "campaigns_attributed": attribution["campaigns"],
             "insights": source,
         }
         logger.info("Nightly pass done for %s: %s", context.store_name, report[str(store_id)])

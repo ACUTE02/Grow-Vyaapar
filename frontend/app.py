@@ -92,6 +92,7 @@ if stores:
         st.Page("pages/reorder.py", title="Reorder", icon="🔮"),
         st.Page("pages/outbox.py", title="Outbox", icon="✉️"),
         st.Page("pages/campaigns.py", title="Campaigns", icon="🎉"),
+        st.Page("pages/performance.py", title="Performance", icon="📈"),
     ]
     # Feature-flagged navigation: these appear only for verticals that need them.
     if flags.get("jobs"):

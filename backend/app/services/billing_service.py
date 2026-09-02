@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models.base import utcnow
 from app.models.core import Customer, Product, StockLevel, Transaction, TransactionItem
-from app.services import batch_service
+from app.services import batch_service, coupon_service, loyalty_service
 from app.services.errors import ConflictError, NotFoundError, ValidationError
 from app.verticals.context import StoreContext
 
@@ -142,6 +142,8 @@ def create_sale(
     payment_mode: str = "cash",
     created_at: datetime | None = None,
     status: str = "completed",
+    coupon_code: str | None = None,
+    redeem_points: int = 0,
 ) -> Transaction:
     """Validate stock, write the transaction and decrement stock in one DB transaction.
 
@@ -189,6 +191,26 @@ def create_sale(
                 f"{needed.normalize()} requested"
             )
 
+    # A coupon and loyalty points are both just money off, but each has to be
+    # validated before the bill is written and recorded after it.
+    line_subtotal = compute_totals(prepared, Decimal("0.00")).subtotal
+    coupon = None
+    coupon_amount = Decimal("0.00")
+    if coupon_code:
+        coupon, coupon_amount = coupon_service.validate(
+            db, context, coupon_code, line_subtotal
+        )
+
+    points_value = Decimal("0.00")
+    if redeem_points:
+        points_value = loyalty_service.quote_redemption(
+            db, context, customer_id, int(redeem_points)
+        )
+
+    discount = money(discount) + coupon_amount + points_value
+    if discount > line_subtotal:
+        discount = line_subtotal
+
     totals = compute_totals(prepared, discount)
     stamp = created_at or utcnow()
 
@@ -228,6 +250,18 @@ def create_sale(
         _move_stock(db, wanted, stamp, direction=-1)
 
     db.flush()
+
+    if status == "completed":
+        if coupon is not None:
+            coupon_service.redeem(
+                db, coupon, transaction_id=transaction.id, customer_id=customer_id
+            )
+        if redeem_points:
+            loyalty_service.spend_for_sale(db, context, transaction, int(redeem_points))
+        loyalty_service.accrue_for_sale(db, context, transaction)
+        loyalty_service.reward_if_first_sale(db, context, transaction)
+
+    db.flush()
     return transaction
 
 
@@ -250,6 +284,9 @@ def refund_sale(db: Session, context: StoreContext, transaction_id: int) -> Tran
         if item.batch_allocation:
             batch_service.restore(db, item.batch_allocation)
     _move_stock(db, quantities, utcnow(), direction=+1)
+
+    coupon_service.release(db, transaction.id)
+    loyalty_service.reverse_for_refund(db, context, transaction)
 
     transaction.status = "refunded"
     db.flush()

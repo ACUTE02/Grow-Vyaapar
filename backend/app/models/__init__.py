@@ -8,6 +8,14 @@ from app.models.config import (
     StoreConfig,
     Vertical,
 )
+from app.models.commerce import (
+    CampaignStat,
+    Coupon,
+    CouponRedemption,
+    LoyaltyAccount,
+    LoyaltyLedger,
+    Referral,
+)
 from app.models.ml import LlmCache, ModelRun, StockForecast
 from app.models.core import (
     Batch,
@@ -49,4 +57,10 @@ __all__ = [
     "LlmCache",
     "ModelRun",
     "StockForecast",
+    "Coupon",
+    "CouponRedemption",
+    "CampaignStat",
+    "LoyaltyAccount",
+    "LoyaltyLedger",
+    "Referral",
 ]

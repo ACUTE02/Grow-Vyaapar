@@ -18,6 +18,7 @@ class CustomerIn(BaseModel):
     family_head_id: int | None = None
     notes: str | None = None
     marketing_opt_in: bool = True
+    referral_code: str | None = None
 
     @field_validator("phone")
     @classmethod

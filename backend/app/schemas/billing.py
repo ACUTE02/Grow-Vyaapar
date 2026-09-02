@@ -19,6 +19,8 @@ class SaleIn(BaseModel):
     lines: list[SaleLineIn] = Field(min_length=1)
     discount: Decimal = Decimal("0.00")
     payment_mode: str = "cash"
+    coupon_code: str | None = None
+    redeem_points: int = Field(default=0, ge=0)
 
 
 class SaleLineOut(BaseModel):

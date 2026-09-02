@@ -76,6 +76,8 @@ def create_transaction(
             customer_id=payload.customer_id,
             discount=payload.discount,
             payment_mode=payload.payment_mode,
+            coupon_code=payload.coupon_code,
+            redeem_points=payload.redeem_points,
         )
         db.commit()
     except Exception:

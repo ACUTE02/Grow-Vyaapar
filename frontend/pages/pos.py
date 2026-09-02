@@ -87,6 +87,36 @@ with right:
             "Customer", list(options), format_func=lambda value: options[value]
         )
         discount = st.number_input("Bill discount", min_value=0.0, step=10.0, value=0.0)
+        coupon_code = st.text_input("Coupon code", placeholder="DIWALI20").strip().upper()
+        if coupon_code:
+            ok, quote = api.get(
+                f"/loyalty/coupons/{coupon_code}/quote",
+                {"store_id": store_id, "subtotal": float(subtotal) or 1},
+            )
+            if ok:
+                st.success(f"{quote['code']} takes off {ui.money(quote['amount_off'])}")
+            else:
+                st.warning(str(quote))
+
+        redeem_points = 0
+        if customer_id:
+            ok, loyalty = api.get(
+                f"/loyalty/customers/{customer_id}", {"store_id": store_id}
+            )
+            if ok and loyalty["points_balance"] > 0:
+                st.caption(
+                    f"{loyalty['points_balance']} points available "
+                    f"(1 point = {ui.money(loyalty['point_value'])}, earned every "
+                    f"{ui.money(loyalty['rupees_per_point'])} spent)"
+                )
+                redeem_points = st.number_input(
+                    "Redeem points",
+                    min_value=0,
+                    max_value=int(loyalty["points_balance"]),
+                    step=1,
+                    value=0,
+                )
+
         payment_mode = st.radio("Payment", ["cash", "upi", "card"], horizontal=True)
 
         if st.button("Complete sale", type="primary", use_container_width=True):
@@ -106,6 +136,8 @@ with right:
                         "lines": lines,
                         "discount": discount,
                         "payment_mode": payment_mode,
+                        "coupon_code": coupon_code or None,
+                        "redeem_points": int(redeem_points or 0),
                     },
                 )
                 if not ok:

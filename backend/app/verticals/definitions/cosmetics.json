@@ -18,7 +18,10 @@
     "vip_spend_multiplier": 2.0,
     "new_customer_max_visits": 1,
     "near_expiry_days": 60,
-    "job_types": []
+    "job_types": [],
+    "loyalty_rupees_per_point": 100,
+    "loyalty_point_value": 1,
+    "referral_reward_points": 50
   },
   "feature_flags": {
     "expiry": true,

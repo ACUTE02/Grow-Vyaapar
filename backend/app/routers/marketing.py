@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.agents import attribution as attribution_agent
 from app.agents import campaigns as campaign_agent
 from app.agents import insights as insight_agent
 from app.agents import reminders as reminder_agent
@@ -302,3 +303,29 @@ def set_campaign_status(
     db.commit()
     db.refresh(campaign)
     return campaign
+
+
+# -- campaign attribution ----------------------------------------------------
+@router.get("/campaigns/performance")
+def campaign_performance(
+    limit: int = Query(default=20, ge=1, le=100),
+    context: StoreContext = Depends(get_store_context_from_query),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Last-touch attribution over a fixed window. Said plainly, on purpose."""
+    return {
+        "store_id": context.store_id,
+        "window_days": attribution_agent.ATTRIBUTION_WINDOW_DAYS,
+        "method": attribution_agent.METHOD,
+        "campaigns": attribution_agent.performance(db, context, limit=limit),
+    }
+
+
+@router.post("/campaigns/attribution/run")
+def run_attribution(
+    context: StoreContext = Depends(get_store_context_from_query),
+    db: Session = Depends(get_db),
+) -> dict:
+    result = attribution_agent.run(db, context)
+    db.commit()
+    return result
