@@ -17,7 +17,12 @@
     "dead_stock_days": 3,
     "vip_spend_multiplier": 2.0,
     "new_customer_max_visits": 1,
-    "near_expiry_days": 3
+    "near_expiry_days": 3,
+    "job_types": [
+      "custom cake order",
+      "bulk order",
+      "pre-order"
+    ]
   },
   "feature_flags": {
     "expiry": true,

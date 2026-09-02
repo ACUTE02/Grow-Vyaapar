@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models.core import Customer, Job, Product, Transaction, TransactionItem
+from app.models.core import Customer, Product, Transaction, TransactionItem
 from app.schemas.billing import (
     RollupIn,
     RollupOut,
@@ -189,38 +189,6 @@ def refund(
         raise
     db.refresh(transaction)
     return _serialise(db, context, transaction)
-
-
-@router.get("/jobs")
-def list_jobs(
-    status_filter: str | None = Query(default=None, alias="status"),
-    limit: int = Query(default=100, ge=1, le=500),
-    context: StoreContext = Depends(get_store_context_from_query),
-    db: Session = Depends(get_db),
-) -> list[dict]:
-    """Read-only. The jobs workflow itself is out of scope for this phase; this
-    exists so the jobs feature flag has something to show."""
-    statement = (
-        select(Job, Customer.name)
-        .outerjoin(Customer, Customer.id == Job.customer_id)
-        .where(Job.store_id == context.store_id)
-    )
-    if status_filter:
-        statement = statement.where(Job.status == status_filter)
-    statement = statement.order_by(Job.promised_date.asc()).limit(limit)
-    return [
-        {
-            "id": job.id,
-            "customer_id": job.customer_id,
-            "customer_name": customer_name,
-            "type": job.type,
-            "status": job.status,
-            "promised_date": job.promised_date,
-            "ready_at": job.ready_at,
-            "delivered_at": job.delivered_at,
-        }
-        for job, customer_name in db.execute(statement).all()
-    ]
 
 
 @router.post("/rollup", response_model=RollupOut)

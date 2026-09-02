@@ -17,7 +17,12 @@
     "dead_stock_days": 90,
     "vip_spend_multiplier": 2.0,
     "new_customer_max_visits": 1,
-    "near_expiry_days": null
+    "near_expiry_days": null,
+    "job_types": [
+      "alteration",
+      "stitching",
+      "pre-order"
+    ]
   },
   "feature_flags": {
     "expiry": false,

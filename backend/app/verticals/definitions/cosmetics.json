@@ -17,7 +17,8 @@
     "dead_stock_days": 90,
     "vip_spend_multiplier": 2.0,
     "new_customer_max_visits": 1,
-    "near_expiry_days": 60
+    "near_expiry_days": 60,
+    "job_types": []
   },
   "feature_flags": {
     "expiry": true,
