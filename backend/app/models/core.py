@@ -151,6 +151,8 @@ class TransactionItem(Base):
     unit_price: Mapped[Decimal] = mapped_column(Money, nullable=False)
     line_discount: Mapped[Decimal] = mapped_column(Money, nullable=False, default=Decimal("0.00"))
     line_total: Mapped[Decimal] = mapped_column(Money, nullable=False)
+    # Which batches this line consumed, when the vertical tracks expiry.
+    batch_allocation: Mapped[list | None] = mapped_column(JSON)
 
     transaction: Mapped[Transaction] = relationship(back_populates="items")
     product: Mapped[Product] = relationship()

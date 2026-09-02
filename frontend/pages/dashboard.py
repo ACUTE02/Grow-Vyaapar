@@ -220,6 +220,24 @@ if reorder_rows:
 if forecast_row[3].button("Open reorder list", use_container_width=True):
     ui.goto("pages/reorder.py")
 
+if ctx["feature_flags"].get("expiry"):
+    expiry = ui.fetch("/products/expiring", {"store_id": store_id})
+    if expiry and expiry.get("batches"):
+        window = expiry.get("near_expiry_days")
+        near = expiry["batches"]
+        expired = expiry.get("expired_count", 0)
+        message = (
+            f"{len(near)} batch(es) expire within {window} days"
+            if window
+            else f"{len(near)} dated batch(es) on the shelf"
+        )
+        if expired:
+            st.error(f"{message}, and {expired} have already expired.")
+        else:
+            st.warning(message + ".")
+        if st.button("Open expiring stock"):
+            ui.goto("pages/expiry.py")
+
 # -- the two stock lists -----------------------------------------------------
 stock_left, stock_right = st.columns(2, gap="large")
 with stock_left:

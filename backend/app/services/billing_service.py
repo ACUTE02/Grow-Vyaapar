@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models.base import utcnow
 from app.models.core import Customer, Product, StockLevel, Transaction, TransactionItem
+from app.services import batch_service
 from app.services.errors import ConflictError, NotFoundError, ValidationError
 from app.verticals.context import StoreContext
 
@@ -206,7 +207,11 @@ def create_sale(
     db.add(transaction)
     db.flush()
 
+    tracks_expiry = context.feature("expiry")
     for line in totals.lines:
+        allocation = None
+        if tracks_expiry and status == "completed":
+            allocation = batch_service.allocate_fefo(db, line.product_id, line.qty)
         db.add(
             TransactionItem(
                 transaction_id=transaction.id,
@@ -215,6 +220,7 @@ def create_sale(
                 unit_price=line.unit_price,
                 line_discount=line.line_discount,
                 line_total=line.line_total,
+                batch_allocation=allocation,
             )
         )
 
@@ -241,6 +247,8 @@ def refund_sale(db: Session, context: StoreContext, transaction_id: int) -> Tran
     quantities: dict[int, Decimal] = {}
     for item in transaction.items:
         quantities[item.product_id] = quantities.get(item.product_id, Decimal("0")) + qty(item.qty)
+        if item.batch_allocation:
+            batch_service.restore(db, item.batch_allocation)
     _move_stock(db, quantities, utcnow(), direction=+1)
 
     transaction.status = "refunded"

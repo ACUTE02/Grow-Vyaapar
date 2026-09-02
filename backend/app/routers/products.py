@@ -19,7 +19,7 @@ from app.schemas.products import (
     ProductUpdate,
     StockRowOut,
 )
-from app.services import product_service, stock_service
+from app.services import batch_service, product_service, stock_service
 from app.verticals.context import StoreContext, get_store_context_from_query
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -68,40 +68,26 @@ def dead_stock(
 
 @router.get("/expiring")
 def expiring(
-    within_days: int = Query(default=90, ge=1, le=720),
-    limit: int = Query(default=100, ge=1, le=500),
+    within_days: int | None = Query(
+        default=None, ge=1, le=720,
+        description="defaults to this vertical's near_expiry_days; omit for every dated batch",
+    ),
+    limit: int = Query(default=200, ge=1, le=500),
     context: StoreContext = Depends(get_store_context_from_query),
     db: Session = Depends(get_db),
-) -> list[dict]:
-    """Read-only batch list. Batch handling itself is out of scope for this phase;
-    this exists so the expiry feature flag has something to show."""
-    if not context.feature("expiry"):
-        return []
-    cutoff = date.today() + timedelta(days=within_days)
-    rows = db.execute(
-        select(Batch, Product)
-        .join(Product, Product.id == Batch.product_id)
-        .where(
-            Product.store_id == context.store_id,
-            Batch.expiry_date.is_not(None),
-            Batch.expiry_date <= cutoff,
-        )
-        .order_by(Batch.expiry_date.asc())
-        .limit(limit)
-    ).all()
-    today = date.today()
-    return [
-        {
-            "sku": product.sku,
-            "name": product.name,
-            "batch_no": batch.batch_no,
-            "expiry_date": batch.expiry_date,
-            "days_left": (batch.expiry_date - today).days,
-            "qty": batch.qty,
-            "unit_label": context.unit_label,
-        }
-        for batch, product in rows
-    ]
+) -> dict:
+    """Batches ordered by expiry, with this vertical's own alert window applied."""
+    window = within_days if within_days is not None else context.cfg("near_expiry_days")
+    rows = batch_service.near_expiry(db, context, within_days=window, limit=limit)
+    return {
+        "store_id": context.store_id,
+        "tracks_expiry": context.feature("expiry"),
+        "near_expiry_days": context.cfg("near_expiry_days"),
+        "window_days": window,
+        "alert_count": sum(1 for row in rows if row["days_left"] <= (window or 0)),
+        "expired_count": sum(1 for row in rows if row["is_expired"]),
+        "batches": rows,
+    }
 
 
 # -- products ----------------------------------------------------------------

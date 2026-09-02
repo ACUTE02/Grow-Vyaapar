@@ -14,7 +14,7 @@ from app.agents import forecasting, segmentation
 from app.llm import client as llm
 from app.llm import prompts
 from app.models.agent import Campaign
-from app.services import stock_service
+from app.services import batch_service, stock_service
 from app.services.errors import NotFoundError
 from app.settings import settings
 from app.verticals.context import StoreContext
@@ -69,9 +69,23 @@ def create(
     if not occasion.strip():
         raise NotFoundError("An occasion is required to draft a campaign")
 
-    # Stock the forecaster says is about to go stale is better campaign material
-    # than stock that already has: it can still be sold at full price.
+    # Stock with an expiry date on the horizon is the single best thing to push,
+    # so it comes first where the vertical tracks batches at all.
     products = [
+        {
+            "sku": row["sku"],
+            "name": row["name"],
+            "qty_on_hand": row["qty"],
+            "days_since_sold": None,
+            "why": f"expires in {row['days_left']} days",
+        }
+        for row in batch_service.near_expiry(db, context)[:3]
+        if not row["is_expired"]
+    ]
+
+    # Otherwise, stock the forecaster says is about to go stale: better campaign
+    # material than stock that already has, because it can still sell at price.
+    products = products or [
         {
             "sku": row.sku,
             "name": row.name,

@@ -17,7 +17,8 @@
     "inactive_days": 150,
     "dead_stock_days": 180,
     "vip_spend_multiplier": 2.0,
-    "new_customer_max_visits": 1
+    "new_customer_max_visits": 1,
+    "near_expiry_days": null
   },
   "feature_flags": {
     "expiry": false,
