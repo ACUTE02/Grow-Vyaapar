@@ -171,8 +171,8 @@ def create_sale(
             LineInput(
                 product_id=product.id,
                 qty=line_qty,
-                unit_price=money(raw.get("unit_price", product.sell_price)),
-                line_discount=money(raw.get("line_discount", 0)),
+                unit_price=money(raw.get("unit_price") or product.sell_price),
+                line_discount=money(raw.get("line_discount") or 0),
                 gst_rate=Decimal(str(product.gst_rate or 0)),
             )
         )
