@@ -59,6 +59,7 @@ CUSTOMERS_PER_STORE = 300
 PRODUCTS_PER_STORE = 150
 LAPSED_CUSTOMERS = 40
 DEAD_SKUS = 12
+SLOW_SKUS = 20
 VIP_CUSTOMERS = 3
 NEW_CUSTOMERS = 25
 
@@ -289,9 +290,15 @@ def seed_store(db: Session, rng: random.Random, store: Store, vertical: Vertical
             )
     db.execute(insert(Product), product_rows)
 
-    # The last DEAD_SKUS products are never sold: that is the dead-stock demo.
-    sellable = product_rows[:-DEAD_SKUS]
+    # The tail of the catalog never sells: DEAD_SKUS sit far past every window,
+    # SLOW_SKUS sit at a spread of ages so each store's own window catches a
+    # different number of them.
+    sellable = product_rows[: -(DEAD_SKUS + SLOW_SKUS)]
+    slow = product_rows[-(DEAD_SKUS + SLOW_SKUS) : -DEAD_SKUS]
     dead = product_rows[-DEAD_SKUS:]
+    slow_age = {
+        row["id"]: 35 + index * 6 for index, row in enumerate(slow)
+    }
     price_of = {row["id"]: row["sell_price"] for row in product_rows}
     gst_of = {row["id"]: row["gst_rate"] for row in product_rows}
     products_by_category: dict[int, list[int]] = {}
@@ -410,6 +417,7 @@ def seed_store(db: Session, rng: random.Random, store: Store, vertical: Vertical
     for position, row in enumerate(product_rows):
         pid = row["id"]
         is_dead = row in dead
+        slow_days = slow_age.get(pid)
         reorder_point = Decimal(rng.randrange(4, 20))
         if position < 10:                      # a visible low-stock list on day one
             on_hand = Decimal(rng.randrange(0, int(reorder_point)))
@@ -424,7 +432,13 @@ def seed_store(db: Session, rng: random.Random, store: Store, vertical: Vertical
                 "last_received_at": datetime.combine(
                     today - timedelta(days=rng.randrange(1, 60)), time(10, 0)
                 ),
-                "last_sold_at": dead_stamp if is_dead else last_sold.get(pid),
+                "last_sold_at": (
+                    dead_stamp
+                    if is_dead
+                    else datetime.combine(today - timedelta(days=slow_days), time(12, 0))
+                    if slow_days is not None
+                    else last_sold.get(pid)
+                ),
             }
         )
     db.execute(insert(StockLevel), stock_rows)
