@@ -1,0 +1,55 @@
+{
+  "code": "apparel",
+  "name": "Apparel and Fashion",
+  "unit_labels": {
+    "default": "piece",
+    "options": [
+      "piece",
+      "set",
+      "pair",
+      "metre"
+    ]
+  },
+  "default_config": {
+    "reorder_cycle_days": 120,
+    "revisit_cycle_days": 150,
+    "inactive_days": 180,
+    "dead_stock_days": 90,
+    "vip_spend_multiplier": 2.0,
+    "new_customer_max_visits": 1
+  },
+  "feature_flags": {
+    "expiry": false,
+    "serial": false,
+    "jobs": true,
+    "appointments": false
+  },
+  "product_schema": {
+    "size": {
+      "type": "string",
+      "required": true
+    },
+    "colour": {
+      "type": "string",
+      "required": true
+    },
+    "fabric": {
+      "type": "string",
+      "required": false
+    },
+    "season": {
+      "type": "string",
+      "required": false
+    }
+  },
+  "prompt_profile": {
+    "tone": "stylish, festive, welcoming to every body type",
+    "language": "Hindi-English mix, lively",
+    "forbidden": [
+      "size shaming",
+      "fake stock scarcity",
+      "unverified brand claims"
+    ],
+    "signature": "{store_name}, {city}"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "code": "electronics",
+  "name": "Electronics",
+  "unit_labels": {
+    "default": "piece",
+    "options": [
+      "piece",
+      "box",
+      "set"
+    ]
+  },
+  "default_config": {
+    "reorder_cycle_days": 540,
+    "revisit_cycle_days": 365,
+    "inactive_days": 270,
+    "dead_stock_days": 120,
+    "vip_spend_multiplier": 2.0,
+    "new_customer_max_visits": 1
+  },
+  "feature_flags": {
+    "expiry": false,
+    "serial": true,
+    "jobs": true,
+    "appointments": false
+  },
+  "product_schema": {
+    "model": {
+      "type": "string",
+      "required": true
+    },
+    "imei": {
+      "type": "string",
+      "required": false
+    },
+    "warranty_months": {
+      "type": "number",
+      "required": true
+    }
+  },
+  "prompt_profile": {
+    "tone": "clear, specification-led, no hype",
+    "language": "English with simple Hindi, factual",
+    "forbidden": [
+      "unverifiable performance claims",
+      "fake launch dates",
+      "warranty promises beyond the recorded months"
+    ],
+    "signature": "{store_name}, {city}"
+  }
+}

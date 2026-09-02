@@ -1,0 +1,55 @@
+{
+  "code": "cosmetics",
+  "name": "Cosmetics and Beauty",
+  "unit_labels": {
+    "default": "piece",
+    "options": [
+      "piece",
+      "bottle",
+      "tube",
+      "box"
+    ]
+  },
+  "default_config": {
+    "reorder_cycle_days": 45,
+    "revisit_cycle_days": 90,
+    "inactive_days": 120,
+    "dead_stock_days": 90,
+    "vip_spend_multiplier": 2.0,
+    "new_customer_max_visits": 1
+  },
+  "feature_flags": {
+    "expiry": true,
+    "serial": false,
+    "jobs": false,
+    "appointments": true
+  },
+  "product_schema": {
+    "brand": {
+      "type": "string",
+      "required": true
+    },
+    "shade": {
+      "type": "string",
+      "required": false
+    },
+    "volume_ml": {
+      "type": "number",
+      "required": false
+    },
+    "expiry_date": {
+      "type": "date",
+      "required": true
+    }
+  },
+  "prompt_profile": {
+    "tone": "friendly, aspirational, never body-shaming",
+    "language": "English with light Hindi, upbeat",
+    "forbidden": [
+      "skin-lightening claims",
+      "guaranteed results",
+      "comparisons that shame appearance"
+    ],
+    "signature": "{store_name}, {city}"
+  }
+}

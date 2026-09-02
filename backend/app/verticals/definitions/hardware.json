@@ -1,0 +1,52 @@
+{
+  "code": "hardware",
+  "name": "Hardware and Building Supplies",
+  "unit_labels": {
+    "default": "piece",
+    "options": [
+      "piece",
+      "kg",
+      "metre",
+      "box",
+      "bag"
+    ]
+  },
+  "default_config": {
+    "reorder_cycle_days": 60,
+    "revisit_cycle_days": 90,
+    "inactive_days": 150,
+    "dead_stock_days": 180,
+    "vip_spend_multiplier": 2.0,
+    "new_customer_max_visits": 1
+  },
+  "feature_flags": {
+    "expiry": false,
+    "serial": false,
+    "jobs": false,
+    "appointments": false
+  },
+  "product_schema": {
+    "brand": {
+      "type": "string",
+      "required": true
+    },
+    "size_spec": {
+      "type": "string",
+      "required": true
+    },
+    "material": {
+      "type": "string",
+      "required": false
+    }
+  },
+  "prompt_profile": {
+    "tone": "plain, practical, trade-friendly",
+    "language": "Hindi-English mix, blunt and short",
+    "forbidden": [
+      "safety claims about tools",
+      "load-bearing guarantees",
+      "fake bulk-rate offers"
+    ],
+    "signature": "{store_name}, {city}"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "code": "optical",
+  "name": "Optical",
+  "unit_labels": {
+    "default": "pair",
+    "options": [
+      "pair",
+      "piece",
+      "box"
+    ]
+  },
+  "default_config": {
+    "reorder_cycle_days": 365,
+    "revisit_cycle_days": 365,
+    "inactive_days": 240,
+    "dead_stock_days": 90,
+    "vip_spend_multiplier": 2.0,
+    "new_customer_max_visits": 1
+  },
+  "feature_flags": {
+    "expiry": false,
+    "serial": false,
+    "jobs": true,
+    "appointments": true
+  },
+  "product_schema": {
+    "frame_type": {
+      "type": "string",
+      "required": true
+    },
+    "material": {
+      "type": "string",
+      "required": true
+    },
+    "lens_index": {
+      "type": "number",
+      "required": false
+    }
+  },
+  "prompt_profile": {
+    "tone": "caring, precise, service-led",
+    "language": "simple English with Hindi words",
+    "forbidden": [
+      "medical eye advice",
+      "claims about curing vision",
+      "pressure to upgrade lenses"
+    ],
+    "signature": "{store_name}, {city}"
+  }
+}

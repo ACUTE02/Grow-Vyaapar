@@ -1,0 +1,51 @@
+{
+  "code": "bakery",
+  "name": "Bakery",
+  "unit_labels": {
+    "default": "kg",
+    "options": [
+      "kg",
+      "g",
+      "piece",
+      "box"
+    ]
+  },
+  "default_config": {
+    "reorder_cycle_days": 7,
+    "revisit_cycle_days": 21,
+    "inactive_days": 45,
+    "dead_stock_days": 3,
+    "vip_spend_multiplier": 2.0,
+    "new_customer_max_visits": 1
+  },
+  "feature_flags": {
+    "expiry": true,
+    "serial": false,
+    "jobs": true,
+    "appointments": false
+  },
+  "product_schema": {
+    "shelf_life_hours": {
+      "type": "number",
+      "required": true
+    },
+    "is_eggless": {
+      "type": "boolean",
+      "required": true
+    },
+    "weight_g": {
+      "type": "number",
+      "required": false
+    }
+  },
+  "prompt_profile": {
+    "tone": "cheerful, fresh, appetising",
+    "language": "Hindi-English mix, short and warm",
+    "forbidden": [
+      "health or diet claims",
+      "hiding egg content",
+      "stale stock promoted as fresh"
+    ],
+    "signature": "{store_name}, {city}"
+  }
+}

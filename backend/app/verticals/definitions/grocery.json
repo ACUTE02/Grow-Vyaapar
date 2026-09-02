@@ -1,0 +1,52 @@
+{
+  "code": "grocery",
+  "name": "Grocery / Kirana",
+  "unit_labels": {
+    "default": "kg",
+    "options": [
+      "kg",
+      "g",
+      "litre",
+      "packet",
+      "piece"
+    ]
+  },
+  "default_config": {
+    "reorder_cycle_days": 21,
+    "revisit_cycle_days": 30,
+    "inactive_days": 60,
+    "dead_stock_days": 45,
+    "vip_spend_multiplier": 2.0,
+    "new_customer_max_visits": 1
+  },
+  "feature_flags": {
+    "expiry": true,
+    "serial": false,
+    "jobs": false,
+    "appointments": false
+  },
+  "product_schema": {
+    "brand": {
+      "type": "string",
+      "required": true
+    },
+    "pack_size": {
+      "type": "string",
+      "required": true
+    },
+    "unit": {
+      "type": "string",
+      "required": false
+    }
+  },
+  "prompt_profile": {
+    "tone": "warm, neighbourly, value-first",
+    "language": "Hindi-English mix, simple words",
+    "forbidden": [
+      "fake urgency",
+      "claims about health benefits",
+      "misleading price cuts"
+    ],
+    "signature": "{store_name}, {city}"
+  }
+}

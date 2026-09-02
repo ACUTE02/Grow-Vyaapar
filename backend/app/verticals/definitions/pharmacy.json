@@ -1,0 +1,55 @@
+{
+  "code": "pharmacy",
+  "name": "Pharmacy",
+  "unit_labels": {
+    "default": "strip",
+    "options": [
+      "strip",
+      "bottle",
+      "piece",
+      "box"
+    ]
+  },
+  "default_config": {
+    "reorder_cycle_days": 30,
+    "revisit_cycle_days": 90,
+    "inactive_days": 90,
+    "dead_stock_days": 120,
+    "vip_spend_multiplier": 2.0,
+    "new_customer_max_visits": 1
+  },
+  "feature_flags": {
+    "expiry": true,
+    "serial": false,
+    "jobs": false,
+    "appointments": false
+  },
+  "product_schema": {
+    "composition": {
+      "type": "string",
+      "required": true
+    },
+    "batch_no": {
+      "type": "string",
+      "required": true
+    },
+    "expiry_date": {
+      "type": "date",
+      "required": true
+    },
+    "schedule_h": {
+      "type": "boolean",
+      "required": false
+    }
+  },
+  "prompt_profile": {
+    "tone": "respectful, factual, never pushy",
+    "language": "Hindi-English mix, simple words",
+    "forbidden": [
+      "discount claims on medicines",
+      "health advice",
+      "buy-one-get-one offers"
+    ],
+    "signature": "{store_name}, {city}"
+  }
+}
