@@ -66,6 +66,7 @@ def _register_routers() -> None:
         config,
         customers,
         marketing,
+        ml,
         products,
     )
 
@@ -75,6 +76,7 @@ def _register_routers() -> None:
     app.include_router(billing.router)
     app.include_router(analytics.router)
     app.include_router(marketing.router)
+    app.include_router(ml.router)
 
 
 _register_routers()

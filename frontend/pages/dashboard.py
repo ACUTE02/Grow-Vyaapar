@@ -100,6 +100,103 @@ else:
             if st.button(label, key=f"suggestion_{suggestion['title'][:20]}"):
                 ui.goto(page, **state)
 
+# -- churn risk --------------------------------------------------------------
+st.subheader("Churn risk")
+st.caption(
+    "A logistic-regression model trained on this store's own history: features as "
+    "of a cutoff date, labels from whether the customer came back in the window "
+    "after it. The list below is deliberately filtered to customers who have NOT "
+    "lapsed yet - reaching them is the point."
+)
+
+run = None
+ok_run, run_payload = api.get("/ml/churn/latest-run", {"store_id": store_id})
+if ok_run:
+    run = run_payload
+
+churn_controls = st.columns([1, 1, 4])
+if churn_controls[0].button("Train model", use_container_width=True):
+    with st.spinner("Training and scoring..."):
+        ok, payload = api.post("/ml/churn/train", params={"store_id": store_id})
+    st.toast("Model trained" if ok else str(payload))
+    st.rerun()
+if churn_controls[1].button("Rescore", use_container_width=True):
+    ok, payload = api.post("/ml/churn/score", params={"store_id": store_id})
+    st.toast(f"Scored {payload['scored']}" if ok else str(payload))
+    st.rerun()
+
+if run is None:
+    ui.empty_state(
+        "No churn model has been trained for this store yet.",
+        "Press 'Train model'. It trains on this store's own transactions - nothing is shared "
+        "between stores.",
+    )
+else:
+    at_risk = ui.fetch("/ml/churn/at-risk", {"store_id": store_id, "limit": 20}) or []
+    metrics_row = st.columns(4)
+    metrics_row[0].metric("At risk, not yet lapsed", len(at_risk))
+    metrics_row[1].metric("ROC-AUC (holdout)", f"{run['metrics'].get('roc_auc', 0):.3f}")
+    metrics_row[2].metric(
+        "ROC-AUC (5-fold)",
+        f"{run['metrics'].get('roc_auc_cv_mean', 0):.3f}",
+        f"+/- {run['metrics'].get('roc_auc_cv_std', 0):.3f}",
+    )
+    metrics_row[3].metric("Trained on", f"{run['rows_trained']} customers")
+
+    if at_risk:
+        frame = pd.DataFrame(at_risk)
+        frame["probability"] = frame["probability"].map(lambda value: f"{value:.0%}")
+        st.dataframe(
+            frame[["name", "phone", "probability", "segment", "recency_days", "total_spend"]]
+            .rename(columns={"recency_days": "days since visit", "total_spend": "lifetime spend"}),
+            hide_index=True,
+            use_container_width=True,
+        )
+        if st.button("Queue win-back messages for these customers", type="primary"):
+            ok, payload = api.post("/ml/churn/queue-winback", params={"store_id": store_id})
+            if ok:
+                st.success(f"Queued {payload['queued']} win-back messages in the Outbox")
+            else:
+                ui.error_state(str(payload))
+    else:
+        ui.empty_state(
+            "Nobody is flagged high risk while still active.",
+            "Either the model has not scored yet, or every risky customer has already lapsed - "
+            "those appear in the Inactive segment instead.",
+        )
+
+    with st.expander("Model card (what it learned)"):
+        coefficients = run["metrics"].get("coefficients", {})
+        ordered = sorted(coefficients.items(), key=lambda item: abs(item[1]), reverse=True)
+        st.write(
+            {
+                "model": f"{run['model_name']} v{run['model_version']}",
+                "trained_at": run["trained_at"][:16].replace("T", " "),
+                "cutoff_date": run["metrics"].get("cutoff_date"),
+                "label window (days)": run["metrics"].get("label_window_days"),
+                "churn rate in training data": run["metrics"].get(
+                    "churn_rate_in_training_data"
+                ),
+                "accuracy": run["metrics"].get("accuracy"),
+                "precision": run["metrics"].get("precision"),
+                "recall": run["metrics"].get("recall"),
+            }
+        )
+        st.caption("Coefficients, largest effect first (positive pushes towards churn):")
+        st.dataframe(
+            pd.DataFrame(ordered, columns=["feature", "weight"]),
+            hide_index=True,
+            use_container_width=True,
+        )
+        matrix = run["metrics"].get("confusion_matrix")
+        if matrix:
+            st.caption("Confusion matrix (rows: actual stayed/churned, columns: predicted)")
+            st.dataframe(
+                pd.DataFrame(matrix, columns=["predicted stayed", "predicted churned"],
+                             index=["actually stayed", "actually churned"]),
+                use_container_width=True,
+            )
+
 # -- the two stock lists -----------------------------------------------------
 stock_left, stock_right = st.columns(2, gap="large")
 with stock_left:

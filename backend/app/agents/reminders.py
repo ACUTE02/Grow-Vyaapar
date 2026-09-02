@@ -180,24 +180,52 @@ def _signal_transaction_completed(
 def _signal_segment_inactive(
     db: Session, context: StoreContext, rule: ReminderRule
 ) -> list[Candidate]:
-    """Weekly batch: the agent's own Inactive segment, not a raw date query."""
+    """Two sources, one signal.
+
+    First the customers the churn model says are about to go quiet but have not
+    yet - contacting them is the whole point of having a model. Then the ones
+    already filed Inactive, who are a rescue job rather than a save.
+    """
+    from app.agents import churn as churn_agent  # noqa: PLC0415  (avoids a cycle)
+
+    inactive_days = context.cfg_int("inactive_days", 90)
+
+    at_risk = churn_agent.at_risk_customers(
+        db, context.store_id, exclude_inactive=True, limit=MAX_PER_KIND
+    )
+    predicted = [
+        Candidate(
+            customer_id=row["customer_id"],
+            facts={
+                "days": row.get("recency_days") or 0,
+                "total_spend": row.get("total_spend") or 0.0,
+                "churn_probability": round(row["probability"], 2),
+                "reason": "predicted at risk, not yet lapsed",
+            },
+        )
+        for row in at_risk
+    ]
+
     rows = db.scalars(
         select(Segment).where(
             Segment.store_id == context.store_id, Segment.segment == "Inactive"
         )
     ).all()
-    candidates = [
+    lapsed = [
         Candidate(
             customer_id=segment.customer_id,
             facts={
-                "days": segment.recency_days or context.cfg_int("inactive_days", 90),
+                "days": segment.recency_days or inactive_days,
                 "total_spend": float(segment.total_spend or 0),
+                "reason": "already inactive",
             },
         )
         for segment in rows
     ]
-    candidates.sort(key=lambda item: item.facts["days"], reverse=True)
-    return candidates
+    lapsed.sort(key=lambda item: item.facts["days"], reverse=True)
+
+    seen = {candidate.customer_id for candidate in predicted}
+    return predicted + [item for item in lapsed if item.customer_id not in seen]
 
 
 def _signal_customer_dob_or_anniversary(
