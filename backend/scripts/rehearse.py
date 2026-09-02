@@ -8,6 +8,7 @@ Exits non-zero if any step fails, so it doubles as a smoke test before a demo.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 import httpx
@@ -17,13 +18,36 @@ from app.settings import settings
 BASE = settings.api_base_url.rstrip("/")
 TIMEOUT = 60.0
 
+DEMO_EMAIL = os.environ.get("REHEARSE_EMAIL", "owner@localai.demo")
+DEMO_PASSWORD = os.environ.get("REHEARSE_PASSWORD", "localai123")
+TOKEN: str | None = None
+
 
 class StepFailed(Exception):
     pass
 
 
+def _sign_in() -> None:
+    """The API refuses anonymous requests, so the rehearsal signs in like a person."""
+    global TOKEN
+    response = httpx.post(
+        f"{BASE}/auth/login",
+        json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD},
+        timeout=TIMEOUT,
+    )
+    if response.status_code >= 400:
+        raise StepFailed(
+            f"Could not sign in as {DEMO_EMAIL}: {response.status_code} {response.text[:200]}. "
+            "Has the seed been run on this instance?"
+        )
+    TOKEN = response.json()["access_token"]
+
+
 def _call(method: str, path: str, **kwargs) -> dict | list:
-    response = httpx.request(method, f"{BASE}{path}", timeout=TIMEOUT, **kwargs)
+    headers = {**(kwargs.pop("headers", None) or {})}
+    if TOKEN:
+        headers["Authorization"] = f"Bearer {TOKEN}"
+    response = httpx.request(method, f"{BASE}{path}", timeout=TIMEOUT, headers=headers, **kwargs)
     if response.status_code >= 400:
         raise StepFailed(f"{method} {path} -> {response.status_code} {response.text[:200]}")
     return response.json()
@@ -109,6 +133,7 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
+        _sign_in()
         stores = _call("GET", "/config/stores")
     except (httpx.HTTPError, StepFailed) as exc:
         print(f"Cannot reach the API at {BASE}: {exc}")

@@ -110,7 +110,11 @@ def _sidebar(stores: list[dict]) -> dict | None:
 
 
 if not st.session_state.get("token"):
-    _login_screen()
+    # A one-page navigation with the sidebar hidden, so Streamlit does not
+    # advertise every page in pages/ to someone who has not signed in.
+    st.navigation(
+        [st.Page(_login_screen, title="Sign in", url_path="sign-in")], position="hidden"
+    ).run()
     st.stop()
 
 stores = _load_stores()
