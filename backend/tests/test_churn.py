@@ -223,9 +223,31 @@ def test_at_risk_excludes_customers_who_have_already_lapsed(trained_store, db) -
     including = churn.at_risk_customers(db, store.id, exclude_inactive=False, limit=100)
     excluding = churn.at_risk_customers(db, store.id, exclude_inactive=True, limit=100)
 
-    assert including, "the fixture should produce some high-risk customers"
+    assert including, "the fixture should produce some at-risk customers"
     assert all(row["segment"] != "Inactive" for row in excluding)
     assert len(excluding) <= len(including)
+    probabilities = [row["probability"] for row in excluding]
+    assert probabilities == sorted(probabilities, reverse=True), "riskiest first"
+
+
+def test_the_action_list_falls_back_to_the_medium_band_when_every_high_risk_customer_has_gone(
+    trained_store, db
+) -> None:
+    """A model that separates cleanly can put every high-risk name in Inactive.
+
+    The nightly run would then have nobody to contact, which is the opposite of
+    the point, so the source falls back to the medium band.
+    """
+    store, context = trained_store
+    churn.train_store(db, context)
+    churn.score_store(db, context)
+    segmentation.rebuild(db, context)
+    db.commit()
+
+    rows = churn.at_risk_customers(db, store.id, exclude_inactive=True, limit=100)
+    assert rows, "the fallback must find somebody still worth contacting"
+    assert all(row["probability"] >= churn.MEDIUM_RISK for row in rows)
+    assert all(row["segment"] != "Inactive" for row in rows)
 
 
 # -- the API -----------------------------------------------------------------
@@ -278,6 +300,7 @@ def test_high_risk_customers_who_have_not_lapsed_get_a_winback(client, rules) ->
 
     at_risk = churn.at_risk_customers(db, store.id, exclude_inactive=True, limit=50)
     assert at_risk, "no pre-lapse customer was flagged, the wiring has nothing to act on"
+    assert all(row["segment"] != "Inactive" for row in at_risk)
 
     queued = client.post(f"/ml/churn/queue-winback?store_id={store.id}").json()
     assert queued["queued"] > 0

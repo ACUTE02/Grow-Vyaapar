@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import sys
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -27,13 +28,48 @@ from app.verticals.loader import load_verticals  # noqa: E402
 
 @pytest.fixture()
 def engine(tmp_path: Path):
-    url = f"sqlite:///{(tmp_path / 'test.db').as_posix()}"
-    eng = create_engine(url, connect_args={"check_same_thread": False}, future=True)
+    """SQLite by default; set TEST_DATABASE_URL to run the same suite on Postgres.
+
+    Each test gets its own schema on Postgres, so the suite can run in parallel
+    against one server without tests treading on each other.
+    """
+    url = os.environ.get("TEST_DATABASE_URL")
+    if not url:
+        eng = create_engine(
+            f"sqlite:///{(tmp_path / 'test.db').as_posix()}",
+            connect_args={"check_same_thread": False},
+            future=True,
+        )
+        Base.metadata.create_all(eng)
+        try:
+            yield eng
+        finally:
+            eng.dispose()
+        return
+
+    from sqlalchemy import text
+
+    schema = f"t{uuid.uuid4().hex[:12]}"
+    admin = create_engine(url, future=True, isolation_level="AUTOCOMMIT")
+    with admin.connect() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    admin.dispose()
+
+    eng = create_engine(
+        url,
+        future=True,
+        connect_args={"options": f"-csearch_path={schema}"},
+        poolclass=None,
+    )
     Base.metadata.create_all(eng)
     try:
         yield eng
     finally:
         eng.dispose()
+        admin = create_engine(url, future=True, isolation_level="AUTOCOMMIT")
+        with admin.connect() as connection:
+            connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        admin.dispose()
 
 
 @pytest.fixture()

@@ -1,0 +1,85 @@
+# Render blueprint. `render blueprint launch` or point a new Blueprint at this
+# repository. Everything here is free-tier shaped: one web service, one worker
+# for the nightly agent run, one cron for the backup.
+#
+# Secrets are never in this file. sync:false means Render asks for the value
+# once and stores it; the repository only ever names the variable.
+
+services:
+  - type: web
+    name: localai-os-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    region: singapore                 # closest to an Indian shop
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL             # from the managed Postgres below
+        fromDatabase:
+          name: localai-os-db
+          property: connectionString
+      - key: AUTH_ENABLED
+        value: "true"
+      - key: JWT_SECRET               # generate once: secrets.token_urlsafe(48)
+        generateValue: true
+      - key: JSON_LOGS
+        value: "true"
+      - key: LLM_PROVIDER_ORDER
+        value: gemini,groq
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: DELIVERY_ADAPTER
+        value: console                # a deployed demo must not message anyone
+      - key: DELIVERY_DAILY_CAP
+        value: "50"
+      - key: SCHEDULER_ENABLED
+        value: "false"                # the worker below runs it, not the web dyno
+
+  - type: worker
+    name: localai-os-scheduler
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter                     # a free plan has no always-on worker
+    region: singapore
+    dockerCommand: python scheduler.py
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: localai-os-db
+          property: connectionString
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      - key: JSON_LOGS
+        value: "true"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DELIVERY_ADAPTER
+        value: console                # the nightly run drafts; it never sends
+
+  - type: cron
+    name: localai-os-backup
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    schedule: "30 20 * * *"           # 02:00 Asia/Kolkata, an hour before the agent run
+    dockerCommand: python -m scripts.backup
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: localai-os-db
+          property: connectionString
+      - key: BACKUP_DIR
+        value: /var/data/backups
+      - key: BACKUP_KEEP
+        value: "14"
+
+databases:
+  - name: localai-os-db
+    plan: free
+    region: singapore
+    postgresMajorVersion: "16"

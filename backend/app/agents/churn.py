@@ -425,12 +425,24 @@ def score_store(db: Session, context: StoreContext) -> dict[str, Any]:
 
 
 def at_risk_customers(
-    db: Session, store_id: int, *, exclude_inactive: bool = True, limit: int = 20
+    db: Session,
+    store_id: int,
+    *,
+    exclude_inactive: bool = True,
+    limit: int = 20,
+    min_probability: float | None = None,
 ) -> list[dict[str, Any]]:
-    """High-risk customers, by default only those not already written off as Inactive.
+    """The riskiest customers who have NOT lapsed yet.
 
     That exclusion is the entire point of the model: an Inactive customer has
-    already gone. These have not - yet.
+    already gone, and phase 1 could already find them with a date filter.
+
+    The high band (0.7) is the headline number, but on a well separated model
+    every customer above it may already have lapsed - which would leave the
+    nightly run with nobody to contact and the model doing no work. So when the
+    high band is empty of active customers, this falls back to the medium band.
+    The list is always ordered riskiest first, so the fallback only ever adds
+    people the model still considers at risk.
     """
     statement = (
         select(ChurnScore, Customer, Segment)
@@ -440,15 +452,16 @@ def at_risk_customers(
             (Segment.customer_id == ChurnScore.customer_id)
             & (Segment.store_id == ChurnScore.store_id),
         )
-        .where(ChurnScore.store_id == store_id, ChurnScore.risk_level == "high")
+        .where(ChurnScore.store_id == store_id)
         .order_by(ChurnScore.probability.desc())
     )
-    results = []
+
+    candidates: list[dict[str, Any]] = []
     for score, customer, segment in db.execute(statement).all():
         label = segment.segment if segment else None
         if exclude_inactive and label == "Inactive":
             continue
-        results.append(
+        candidates.append(
             {
                 "customer_id": customer.id,
                 "name": customer.name,
@@ -462,9 +475,21 @@ def at_risk_customers(
                 "scored_at": score.scored_at,
             }
         )
-        if len(results) >= limit:
-            break
-    return results
+
+    if min_probability is not None:
+        return [row for row in candidates if row["probability"] >= min_probability][:limit]
+
+    high = [row for row in candidates if row["probability"] >= HIGH_RISK]
+    if high:
+        return high[:limit]
+    medium = [row for row in candidates if row["probability"] >= MEDIUM_RISK]
+    if medium:
+        logger.info(
+            "Store %s: no active customer is above %.2f, falling back to the medium band",
+            store_id,
+            HIGH_RISK,
+        )
+    return medium[:limit]
 
 
 def _clip(value: float, bounds: tuple[float, float] | None) -> float:
