@@ -69,3 +69,13 @@ def client(engine, db):
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def rules(db):
+    """Reminder rules and fallback templates, seeded the same way the demo seeds them."""
+    from scripts.seed import seed_rules_and_templates
+
+    seed_rules_and_templates(db)
+    db.commit()
+    return db
