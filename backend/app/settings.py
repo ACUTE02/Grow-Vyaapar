@@ -64,7 +64,9 @@ class Settings(BaseSettings):
     # Enforced in the API, not only hidden in the UI. Turn it off only for local
     # experiments; the deployed instance must run with it on.
     auth_enabled: bool = True
-    jwt_secret: str = "change-me-in-env-this-is-not-a-secret"
+    # No fallback on purpose: a guessable default here would defeat auth entirely.
+    # Set JWT_SECRET in the environment (python -c "import secrets; print(secrets.token_urlsafe(48))").
+    jwt_secret: str
     jwt_expiry_minutes: int = 720
     jwt_cookie_name: str = "localai_token"
 
