@@ -45,11 +45,15 @@ class TwilioWhatsAppAdapter(Adapter):
             return DeliveryResult("failed", "customer has opted out of marketing messages")
 
         to_number = phone if phone.startswith("+") else f"+91{phone[-10:]}"
+        # TWILIO_WHATSAPP_FROM is documented as a bare E.164 number, but Twilio's
+        # own dashboard hands it out pre-fixed with "whatsapp:" - accept either so
+        # the two prefixes never stack into "whatsapp:whatsapp:+1...".
+        from_number = settings.twilio_whatsapp_from.removeprefix("whatsapp:")
         try:
             response = httpx.post(
                 TWILIO_URL.format(sid=settings.twilio_account_sid),
                 data={
-                    "From": f"whatsapp:{settings.twilio_whatsapp_from}",
+                    "From": f"whatsapp:{from_number}",
                     "To": f"whatsapp:{to_number}",
                     "Body": reminder.message,
                 },
