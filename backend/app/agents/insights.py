@@ -280,7 +280,10 @@ def generate(
             return cached, "cache"
         raise
 
-    source = "template"
+    # "template" means no key was ever tried; "template_failed" means a key is
+    # configured but the call or its output didn't hold up. The dashboard needs
+    # to tell those apart rather than blaming a missing key for both.
+    source = "template" if not llm.available() else "template_failed"
     suggestions = template_suggestions(metrics)
 
     if llm.available():

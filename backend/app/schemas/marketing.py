@@ -64,7 +64,7 @@ class InsightOut(BaseModel):
     generated_at: datetime
     metrics: dict[str, Any]
     suggestions: list[SuggestionOut]
-    source: str = Field(description="llm | cache | template")
+    source: str = Field(description="llm | cache | template | template_failed")
 
 
 class CampaignIn(BaseModel):

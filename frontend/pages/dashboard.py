@@ -72,6 +72,8 @@ st.caption(
     {
         "llm": "Written by the model from figures computed in SQL.",
         "template": "No LLM key configured - written by the fallback, same figures.",
+        "template_failed": "The model call didn't come back with usable output - "
+        "written by the fallback instead, same figures.",
         "cache": "Served from the cached insight row (refreshed every 24 hours).",
     }.get(source, source)
 )

@@ -199,7 +199,7 @@ def test_a_broken_model_reply_falls_back_without_raising(db, monkeypatch) -> Non
 
     insight, source = insight_agent.generate(db, context, force=True)
     db.commit()
-    assert source == "template"
+    assert source == "template_failed", "a key was configured, the call just didn't hold up"
     assert len(insight.suggestions_json) == 3
 
 
