@@ -345,7 +345,7 @@ def draft_message(
         fallback_body=body,
         facts=values,
     )
-    return _acceptable(llm.call(prompt, max_tokens=180, db=db), body)
+    return _acceptable(llm.call(prompt, max_tokens=400, db=db), body)
 
 
 def draft_batch(
@@ -391,7 +391,7 @@ def draft_batch(
         parsed = prompts.parse_json_block(
             llm.call(
                 prompts.batch_reminder_prompt(context, items),
-                max_tokens=180 * len(items),
+                max_tokens=400 * len(items),
                 db=db,
             )
         )

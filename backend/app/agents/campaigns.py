@@ -134,7 +134,7 @@ def create(
 
         described = llm.call(
             prompts.campaign_image_prompt(context, occasion=occasion, products=products),
-            max_tokens=120,
+            max_tokens=500,
             db=db,
         )
         if described:
