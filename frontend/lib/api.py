@@ -49,6 +49,31 @@ def get(path: str, params: dict | None = None) -> tuple[bool, Any]:
     return _request("GET", path, params=params or {})
 
 
+def get_file(path: str, params: dict | None = None) -> tuple[bool, Any, str]:
+    """Fetch a binary/text response with the signed-in user's auth headers.
+
+    A plain link to the API (st.link_button, an <a href>) hits the backend from
+    the visitor's own browser, with no Authorization header - an authenticated
+    endpoint just 401s. Fetch it here instead, server-side, and hand the bytes
+    to the page to serve however it likes (st.download_button, say).
+    """
+    url = f"{BASE_URL}{path}"
+    try:
+        response = httpx.get(url, timeout=TIMEOUT, headers=auth_headers(), params=params or {})
+    except httpx.HTTPError as exc:
+        return False, f"Cannot reach the API at {BASE_URL}. Is uvicorn running? ({exc})", ""
+
+    if response.status_code >= 400:
+        try:
+            body = response.json()
+            detail = body.get("detail", response.text)
+        except Exception:
+            detail = response.text
+        return False, detail, ""
+
+    return True, response.content, response.headers.get("content-type", "application/octet-stream")
+
+
 def post(path: str, params: dict | None = None, json: dict | None = None) -> tuple[bool, Any]:
     return _request("POST", path, params=params or {}, json=json)
 

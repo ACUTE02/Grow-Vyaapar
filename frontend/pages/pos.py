@@ -160,10 +160,19 @@ if invoice:
     columns[2].metric("GST", ui.money(invoice["gst_amount"]))
     columns[3].metric("Total", ui.money(invoice["total"]))
 
-    st.link_button(
-        "Open invoice",
-        f"{api.BASE_URL}/billing/transactions/{invoice['id']}/invoice.pdf?store_id={store_id}",
+    ok, content, content_type = api.get_file(
+        f"/billing/transactions/{invoice['id']}/invoice.pdf", {"store_id": store_id}
     )
+    if not ok:
+        ui.error_state(str(content))
+    else:
+        is_pdf = content_type.startswith("application/pdf")
+        st.download_button(
+            "Download invoice" if is_pdf else "Download invoice (HTML - PDF renderer unavailable)",
+            data=content,
+            file_name=f"invoice-{invoice['id']}.{'pdf' if is_pdf else 'html'}",
+            mime=content_type,
+        )
 
     if invoice.get("customer_id"):
         queued = ui.fetch(
