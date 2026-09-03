@@ -130,7 +130,7 @@ def send_reminders(
             if elapsed < gap:
                 time.sleep(gap - elapsed)
 
-        outcome = adapter.send(reminder)
+        outcome = adapter.send(reminder, db)
         last_send = time.monotonic()
 
         reminder.status = outcome.status

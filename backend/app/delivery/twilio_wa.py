@@ -6,15 +6,18 @@ than pretending to have sent anything.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import httpx
 from sqlalchemy import select
 
-from app.db import SessionLocal
 from app.delivery.base import Adapter, DeliveryResult
 from app.models.agent import Reminder
 from app.models.core import Customer
 from app.settings import settings
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +27,7 @@ TWILIO_URL = "https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
 class TwilioWhatsAppAdapter(Adapter):
     name = "twilio_wa"
 
-    def send(self, reminder: Reminder) -> DeliveryResult:
+    def send(self, reminder: Reminder, db: "Session") -> DeliveryResult:
         if not (
             settings.twilio_account_sid
             and settings.twilio_auth_token
@@ -33,10 +36,9 @@ class TwilioWhatsAppAdapter(Adapter):
             logger.error("Twilio adapter selected but credentials are missing")
             return DeliveryResult("failed", "Twilio credentials are not configured")
 
-        with SessionLocal() as db:
-            customer = db.scalar(select(Customer).where(Customer.id == reminder.customer_id))
-            phone = customer.phone if customer else None
-            opted_in = bool(customer.marketing_opt_in) if customer else False
+        customer = db.scalar(select(Customer).where(Customer.id == reminder.customer_id))
+        phone = customer.phone if customer else None
+        opted_in = bool(customer.marketing_opt_in) if customer else False
 
         if not phone:
             logger.error("Reminder %s has no reachable phone number", reminder.id)

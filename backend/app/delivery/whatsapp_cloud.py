@@ -12,15 +12,18 @@ Two things worth knowing before switching this on:
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import httpx
 from sqlalchemy import select
 
-from app.db import SessionLocal
 from app.delivery.base import Adapter, DeliveryResult
 from app.models.agent import Reminder
 from app.models.core import Customer
 from app.settings import settings
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -38,17 +41,16 @@ def to_e164(phone: str, default_country: str = "91") -> str:
 class WhatsAppCloudAdapter(Adapter):
     name = "whatsapp_cloud"
 
-    def send(self, reminder: Reminder) -> DeliveryResult:
+    def send(self, reminder: Reminder, db: "Session") -> DeliveryResult:
         if not (settings.whatsapp_token and settings.whatsapp_phone_number_id):
             return DeliveryResult(
                 "failed",
                 "WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID are not configured",
             )
 
-        with SessionLocal() as db:
-            customer = db.scalar(select(Customer).where(Customer.id == reminder.customer_id))
-            phone = customer.phone if customer else None
-            opted_in = bool(customer.marketing_opt_in) if customer else False
+        customer = db.scalar(select(Customer).where(Customer.id == reminder.customer_id))
+        phone = customer.phone if customer else None
+        opted_in = bool(customer.marketing_opt_in) if customer else False
 
         if not phone:
             return DeliveryResult("failed", "customer has no phone number on record")

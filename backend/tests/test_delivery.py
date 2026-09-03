@@ -217,21 +217,13 @@ def test_the_cloud_adapter_refuses_without_credentials(outbox, monkeypatch) -> N
     db, store, context = outbox
     monkeypatch.setattr(settings, "whatsapp_token", None)
     reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
-    result = whatsapp_cloud.WhatsAppCloudAdapter().send(reminder)
+    result = whatsapp_cloud.WhatsAppCloudAdapter().send(reminder, db)
     assert result.status == "failed"
     assert "WHATSAPP_TOKEN" in result.detail
 
 
-def test_the_cloud_adapter_reports_the_providers_error_verbatim(
-    outbox, monkeypatch, engine
-) -> None:
-    from sqlalchemy.orm import sessionmaker
-
+def test_the_cloud_adapter_reports_the_providers_error_verbatim(outbox, monkeypatch) -> None:
     db, store, context = outbox
-    # The adapter imported SessionLocal by name, so patch it where it is used.
-    monkeypatch.setattr(
-        whatsapp_cloud, "SessionLocal", sessionmaker(bind=engine, autoflush=False, future=True)
-    )
     monkeypatch.setattr(settings, "whatsapp_token", "test-token")
     monkeypatch.setattr(settings, "whatsapp_phone_number_id", "1234567890")
 
@@ -244,20 +236,14 @@ def test_the_cloud_adapter_reports_the_providers_error_verbatim(
 
     monkeypatch.setattr(httpx, "post", rejected)
     reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
-    result = whatsapp_cloud.WhatsAppCloudAdapter().send(reminder)
+    result = whatsapp_cloud.WhatsAppCloudAdapter().send(reminder, db)
 
     assert result.status == "failed"
     assert "131047" in result.detail
 
 
-def test_the_cloud_adapter_reports_success(outbox, monkeypatch, engine) -> None:
-    from sqlalchemy.orm import sessionmaker
-
+def test_the_cloud_adapter_reports_success(outbox, monkeypatch) -> None:
     db, store, context = outbox
-    # The adapter imported SessionLocal by name, so patch it where it is used.
-    monkeypatch.setattr(
-        whatsapp_cloud, "SessionLocal", sessionmaker(bind=engine, autoflush=False, future=True)
-    )
     monkeypatch.setattr(settings, "whatsapp_token", "test-token")
     monkeypatch.setattr(settings, "whatsapp_phone_number_id", "1234567890")
     monkeypatch.setattr(
@@ -271,7 +257,7 @@ def test_the_cloud_adapter_reports_success(outbox, monkeypatch, engine) -> None:
     )
 
     reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
-    result = whatsapp_cloud.WhatsAppCloudAdapter().send(reminder)
+    result = whatsapp_cloud.WhatsAppCloudAdapter().send(reminder, db)
     assert result.status == "sent"
     assert "wamid.TEST" in result.detail
 
@@ -290,6 +276,6 @@ def test_every_adapter_returns_a_result_rather_than_raising(outbox, monkeypatch)
     reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
     for name in ("console", "twilio_wa", "whatsapp_cloud"):
         monkeypatch.setattr(settings, "delivery_adapter", name)
-        result = get_adapter().send(reminder)
+        result = get_adapter().send(reminder, db)
         assert isinstance(result, DeliveryResult)
         assert result.status in {"sent", "failed"}
