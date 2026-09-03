@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     groq_base_url: str = "https://api.groq.com/openai/v1/chat/completions"
 
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3.6-flash"
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/models"
 
     # Providers are tried in this order. Gemini first: generous free tier.
