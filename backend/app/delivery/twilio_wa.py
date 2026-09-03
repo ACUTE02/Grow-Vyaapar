@@ -62,8 +62,24 @@ class TwilioWhatsAppAdapter(Adapter):
                 auth=(settings.twilio_account_sid, settings.twilio_auth_token),
                 timeout=15.0,
             )
-            response.raise_for_status()
-        except Exception as exc:
+        except httpx.HTTPError as exc:
             logger.error("Twilio send failed for reminder %s: %s", reminder.id, exc)
-            return DeliveryResult("failed", str(exc)[:500])
+            return DeliveryResult("failed", f"network error: {exc}"[:500])
+
+        if response.status_code >= 400:
+            # Twilio's body carries a numeric error code and a human message
+            # (e.g. 21211: "'To' number is not a valid phone number") - that is
+            # what actually explains a failed send in the Outbox, not the
+            # generic "400 Bad Request" an httpx exception would have said.
+            try:
+                body = response.json()
+                code, message = body.get("code"), body.get("message")
+                detail = f"Twilio error {code}: {message}" if code is not None else response.text
+            except Exception:
+                detail = response.text
+            logger.error(
+                "Twilio rejected reminder %s: %s %s", reminder.id, response.status_code, detail
+            )
+            return DeliveryResult("failed", detail[:500])
+
         return DeliveryResult("sent", f"twilio sid {response.json().get('sid', '')}")

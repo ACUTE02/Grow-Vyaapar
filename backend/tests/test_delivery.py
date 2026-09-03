@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from app.agents import reminders as reminder_agent
 from app.agents import segmentation
-from app.delivery import whatsapp_cloud
+from app.delivery import twilio_wa, whatsapp_cloud
 from app.delivery.base import DeliveryResult, get_adapter
 from app.models.agent import Reminder
 from app.models.base import utcnow
@@ -205,6 +205,31 @@ def test_the_provider_response_is_kept(outbox) -> None:
     db.refresh(reminder)
     assert reminder.status == "sent"
     assert reminder.provider_response and "console" in reminder.provider_response
+
+
+# -- the Twilio adapter -------------------------------------------------------
+def test_twilio_surfaces_the_providers_error_code_and_message(outbox, monkeypatch) -> None:
+    db, store, context = outbox
+    monkeypatch.setattr(settings, "twilio_account_sid", "ACtest")
+    monkeypatch.setattr(settings, "twilio_auth_token", "test-token")
+    monkeypatch.setattr(settings, "twilio_whatsapp_from", "+15005550006")
+
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *args, **kwargs: httpx.Response(
+            400,
+            request=httpx.Request("POST", "https://api.twilio.com"),
+            json={"code": 21211, "message": "The 'To' number is not a valid phone number"},
+        ),
+    )
+
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    result = twilio_wa.TwilioWhatsAppAdapter().send(reminder, db)
+
+    assert result.status == "failed"
+    assert "21211" in result.detail
+    assert "not a valid phone number" in result.detail
 
 
 # -- the WhatsApp Cloud adapter ----------------------------------------------
