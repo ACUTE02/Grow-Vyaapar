@@ -58,6 +58,31 @@ def cap_remaining(db: Session, store_id: int) -> int:
     return max(settings.delivery_daily_cap - sent_today(db, store_id), 0)
 
 
+# Only a failed send is eligible - this is a state reset, not a retry-with-
+# backoff or an automatic resend. It never touches the adapter and never marks
+# anything sent; it only makes the reminder reachable by the normal send path
+# again; run_reminders and drafting still never write over what the user is
+# working with (rule 10 stays true).
+RETRYABLE_STATUS = "failed"
+
+
+def retry_reminder(db: Session, context: StoreContext, reminder_id: int) -> Reminder:
+    """failed -> queued. The caller still has to press Send - this never sends."""
+    reminder = db.get(Reminder, reminder_id)
+    if reminder is None or reminder.store_id != context.store_id:
+        raise NotFoundError(f"Reminder {reminder_id} does not belong to {context.store_name}")
+    if reminder.status != RETRYABLE_STATUS:
+        raise ConflictError(
+            f"Reminder {reminder_id} is {reminder.status}, not failed - only a failed "
+            "message can be retried"
+        )
+    reminder.status = "queued"
+    reminder.provider_response = None
+    reminder.sent_at = None
+    db.flush()
+    return reminder
+
+
 def send_reminders(
     db: Session, context: StoreContext, reminder_ids: list[int]
 ) -> SendOutcome:

@@ -207,6 +207,212 @@ def test_the_provider_response_is_kept(outbox) -> None:
     assert reminder.provider_response and "console" in reminder.provider_response
 
 
+# -- retrying a failed send ---------------------------------------------------
+def _fail(db, reminder: Reminder, detail: str = "Twilio error 21654: ContentSid Required") -> None:
+    """A reminder that a real send already knocked into 'failed', without
+    needing a network call - the adapter's own job is tested elsewhere."""
+    reminder.status = "failed"
+    reminder.provider_response = detail
+    db.commit()
+
+
+def test_retry_moves_a_failed_reminder_back_to_queued(outbox) -> None:
+    db, store, context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    _fail(db, reminder)
+
+    retried = delivery_service.retry_reminder(db, context, reminder.id)
+    db.commit()
+
+    assert retried.status == "queued"
+    db.refresh(reminder)
+    assert reminder.status == "queued"
+
+
+def test_retry_clears_the_previous_failure_reason(outbox) -> None:
+    db, store, context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    _fail(db, reminder, "Twilio error 21654: ContentSid Required")
+
+    delivery_service.retry_reminder(db, context, reminder.id)
+    db.commit()
+    db.refresh(reminder)
+    assert reminder.provider_response is None
+    assert reminder.sent_at is None
+
+
+def test_retry_does_not_send_anything_itself(outbox) -> None:
+    """Retry only flips a status. It never calls the adapter, and Send is
+    still the only thing that performs a delivery attempt."""
+    db, store, context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    _fail(db, reminder)
+
+    delivery_service.retry_reminder(db, context, reminder.id)
+    db.commit()
+    db.refresh(reminder)
+    assert reminder.status == "queued", "retry must land on queued, never on sent"
+    assert reminder.sent_at is None
+
+
+def test_a_queued_reminder_cannot_be_retried(outbox) -> None:
+    db, store, context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    assert reminder.status == "queued"
+
+    with pytest.raises(Exception, match="not failed"):
+        delivery_service.retry_reminder(db, context, reminder.id)
+
+
+def test_a_sent_reminder_cannot_be_retried(outbox) -> None:
+    db, store, context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    delivery_service.send_reminders(db, context, [reminder.id])
+    db.commit()
+    assert reminder.status == "sent"
+
+    with pytest.raises(Exception, match="not failed"):
+        delivery_service.retry_reminder(db, context, reminder.id)
+
+
+def test_a_dismissed_reminder_cannot_be_retried(outbox) -> None:
+    db, store, context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    reminder.status = "dismissed"
+    db.commit()
+
+    with pytest.raises(Exception, match="not failed"):
+        delivery_service.retry_reminder(db, context, reminder.id)
+
+
+def test_retrying_twice_in_a_row_is_rejected_the_second_time(outbox) -> None:
+    """Double-click protection: the first retry consumes the failed state, so
+    a second click (or a retried request) has nothing eligible to act on."""
+    db, store, context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    _fail(db, reminder)
+
+    delivery_service.retry_reminder(db, context, reminder.id)
+    db.commit()
+    assert reminder.status == "queued"
+
+    with pytest.raises(Exception, match="not failed"):
+        delivery_service.retry_reminder(db, context, reminder.id)
+    db.refresh(reminder)
+    assert reminder.status == "queued", "the second call must not have changed anything"
+
+
+def test_retry_is_scoped_to_the_store(outbox, db) -> None:
+    from tests.test_segmentation import _store as make_store
+
+    _, store, context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    _fail(db, reminder)
+
+    other_store = make_store(db, "pharmacy", "Jeevan Medical")
+    other_context = resolve_store_context(db, other_store.id)
+
+    with pytest.raises(Exception, match="does not belong to"):
+        delivery_service.retry_reminder(db, other_context, reminder.id)
+    db.refresh(reminder)
+    assert reminder.status == "failed", "a cross-store attempt must not modify the row"
+
+
+def test_a_retried_reminder_can_be_sent_again_through_the_normal_adapter_path(outbox) -> None:
+    """End to end: failed -> retry -> queued -> Send -> the same adapter path
+    every other send goes through, not a bypass."""
+    db, store, context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    _fail(db, reminder)
+
+    delivery_service.retry_reminder(db, context, reminder.id)
+    db.commit()
+
+    outcome = delivery_service.send_reminders(db, context, [reminder.id])
+    db.commit()
+    db.refresh(reminder)
+
+    assert outcome.sent == 1
+    assert reminder.status == "sent"
+    assert reminder.provider_response and "console" in reminder.provider_response
+
+
+# -- the retry endpoint --------------------------------------------------------
+def test_the_retry_endpoint_requeues_and_reports_the_new_status(client, outbox) -> None:
+    db, store, context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    _fail(db, reminder, "Twilio error 21654: ContentSid Required")
+
+    response = client.post(
+        f"/marketing/reminders/{reminder.id}/retry?store_id={store.id}"
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "queued"
+    assert body["provider_response"] is None
+
+    db.expire_all()
+    assert db.get(Reminder, reminder.id).status == "queued"
+
+
+def test_the_retry_endpoint_rejects_a_queued_reminder(client, outbox) -> None:
+    db, store, context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    assert reminder.status == "queued"
+
+    response = client.post(
+        f"/marketing/reminders/{reminder.id}/retry?store_id={store.id}"
+    )
+    assert response.status_code == 409, response.text
+
+
+def test_the_retry_endpoint_rejects_an_already_sent_reminder(client, outbox) -> None:
+    db, store, context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    delivery_service.send_reminders(db, context, [reminder.id])
+    db.commit()
+
+    response = client.post(
+        f"/marketing/reminders/{reminder.id}/retry?store_id={store.id}"
+    )
+    assert response.status_code == 409, response.text
+
+
+def test_the_retry_endpoint_is_store_scoped(client, outbox, db) -> None:
+    from tests.test_segmentation import _store as make_store
+
+    _, store, context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    _fail(db, reminder)
+
+    other_store = make_store(db, "pharmacy", "Jeevan Medical")
+
+    response = client.post(
+        f"/marketing/reminders/{reminder.id}/retry?store_id={other_store.id}"
+    )
+    assert response.status_code == 404, response.text
+
+    db.expire_all()
+    assert db.get(Reminder, reminder.id).status == "failed", "no cross-store mutation"
+
+
+def test_double_clicking_retry_through_the_api_is_rejected_the_second_time(
+    client, outbox
+) -> None:
+    db, store, context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    _fail(db, reminder)
+
+    first = client.post(f"/marketing/reminders/{reminder.id}/retry?store_id={store.id}")
+    assert first.status_code == 200
+
+    second = client.post(f"/marketing/reminders/{reminder.id}/retry?store_id={store.id}")
+    assert second.status_code == 409, "the second click has nothing eligible left to retry"
+
+    db.expire_all()
+    assert db.get(Reminder, reminder.id).status == "queued"
+
+
 # -- the Twilio adapter -------------------------------------------------------
 def test_twilio_surfaces_the_providers_error_code_and_message(outbox, monkeypatch) -> None:
     db, store, context = outbox

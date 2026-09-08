@@ -232,6 +232,34 @@ def delivery_status(
     }
 
 
+@router.post("/reminders/{reminder_id}/retry", response_model=ReminderOut)
+def retry_reminder(
+    reminder_id: int,
+    context: StoreContext = Depends(get_store_context_from_query),
+    db: Session = Depends(get_db),
+) -> dict:
+    """failed -> queued. Never sends - the normal Send action still performs
+    the actual delivery attempt, through the same adapter as any other send."""
+    reminder = delivery_service.retry_reminder(db, context, reminder_id)
+    db.commit()
+    db.refresh(reminder)
+    customer = db.get(Customer, reminder.customer_id)
+    return {
+        "id": reminder.id,
+        "customer_id": reminder.customer_id,
+        "customer_name": customer.name if customer else None,
+        "phone": customer.phone if customer else None,
+        "kind": reminder.kind,
+        "channel": reminder.channel,
+        "message": reminder.message,
+        "status": reminder.status,
+        "scheduled_for": reminder.scheduled_for,
+        "sent_at": reminder.sent_at,
+        "provider_response": reminder.provider_response,
+        "created_at": reminder.created_at,
+    }
+
+
 @router.post("/reminders/{reminder_id}/dismiss", response_model=ReminderOut)
 def dismiss_reminder(
     reminder_id: int,

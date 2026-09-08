@@ -98,6 +98,13 @@ else:
             st.rerun()
     chosen: set[int] = st.session_state.setdefault("outbox_selection", set())
 
+    STATUS_LABELS = {
+        "queued": "🕓 queued",
+        "sent": "✅ sent",
+        "failed": "❌ failed",
+        "dismissed": "🚫 dismissed",
+    }
+
     for reminder in reminders:
         with st.container(border=True):
             head = st.columns([3, 2, 2, 2])
@@ -106,7 +113,8 @@ else:
             )
             head[1].markdown(f"`{reminder['kind']}`  \n{reminder['channel']}")
             head[2].markdown(
-                f"{reminder['status']}  \n{(reminder['scheduled_for'] or '')[:16].replace('T', ' ')}"
+                f"{STATUS_LABELS.get(reminder['status'], reminder['status'])}  \n"
+                f"{(reminder['scheduled_for'] or '')[:16].replace('T', ' ')}"
             )
             if reminder["status"] == "queued":
                 ticked = head[3].checkbox(
@@ -118,7 +126,9 @@ else:
                     chosen.add(reminder["id"])
                 else:
                     chosen.discard(reminder["id"])
-                if head[3].button("Send", key=f"send_{reminder['id']}", use_container_width=True):
+                if head[3].button(
+                    "📤 Send", key=f"send_{reminder['id']}", use_container_width=True
+                ):
                     ok, payload = api.post(
                         f"/marketing/reminders/{reminder['id']}/send",
                         params={"store_id": store_id},
@@ -133,8 +143,38 @@ else:
                         params={"store_id": store_id},
                     )
                     st.rerun()
+            elif reminder["status"] == "failed":
+                # Not stuck: the underlying problem (a WhatsApp session, a
+                # Twilio config value, a transient provider error) can be
+                # fixed after the fact. Retry only requeues - it never sends
+                # by itself; Send still performs the one real delivery attempt.
+                if head[3].button(
+                    "🔄 Retry",
+                    key=f"retry_{reminder['id']}",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    ok, payload = api.post(
+                        f"/marketing/reminders/{reminder['id']}/retry",
+                        params={"store_id": store_id},
+                    )
+                    st.toast(
+                        "Message requeued successfully. You can send it again."
+                        if ok else str(payload)
+                    )
+                    st.rerun()
+                if head[3].button(
+                    "Dismiss", key=f"dismiss_failed_{reminder['id']}", use_container_width=True
+                ):
+                    api.post(
+                        f"/marketing/reminders/{reminder['id']}/dismiss",
+                        params={"store_id": store_id},
+                    )
+                    st.rerun()
             st.write(reminder["message"])
-            if reminder.get("provider_response"):
+            if reminder["status"] == "failed" and reminder.get("provider_response"):
+                st.error(f"Reason: {reminder['provider_response']}")
+            elif reminder.get("provider_response"):
                 st.caption(f"Provider said: {reminder['provider_response']}")
 
 
