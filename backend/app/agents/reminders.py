@@ -348,6 +348,16 @@ def draft_message(
     return _acceptable(llm.call(prompt, max_tokens=400, db=db), body)
 
 
+def _batch_timeout(item_count: int) -> float:
+    """A 20-item batch asks for 8000 tokens and a reasoning model needs real
+    wall-clock time to write that much, thinking pass included - the default
+    LLM_TIMEOUT_SECONDS is sized for one message, not twenty, and a batch call
+    was timing out before any response came back regardless of token budget.
+    Scale with the batch, capped so one HTTP call can't hang indefinitely.
+    """
+    return min(60.0, max(settings.llm_timeout_seconds, 3.0 * item_count))
+
+
 def draft_batch(
     db: Session, context: StoreContext, pending: list[dict[str, Any]], *, budget: int
 ) -> None:
@@ -392,6 +402,7 @@ def draft_batch(
             llm.call(
                 prompts.batch_reminder_prompt(context, items),
                 max_tokens=400 * len(items),
+                timeout=_batch_timeout(len(items)),
                 db=db,
             )
         )

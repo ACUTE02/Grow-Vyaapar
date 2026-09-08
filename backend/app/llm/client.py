@@ -166,7 +166,17 @@ def _call_gemini(prompt: str, max_tokens: int, timeout: float) -> str | None:
     response = httpx.post(url, json=payload, timeout=timeout)
     response.raise_for_status()
     data = response.json()
-    parts = data["candidates"][0]["content"]["parts"]
+    candidate = data["candidates"][0]
+    if candidate.get("finishReason") == "MAX_TOKENS":
+        # A reasoning model can spend most (or all) of maxOutputTokens on its
+        # internal "thinking" pass before writing anything, leaving a reply
+        # that is empty or cut off mid-sentence. That is worse than no reply -
+        # every caller already has a template fallback for "no text", so treat
+        # a MAX_TOKENS truncation as exactly that, never as usable text, even
+        # when what came back happens to be short enough to look acceptable.
+        logger.warning("Gemini reply truncated by MAX_TOKENS, discarding it as a fallback case")
+        return None
+    parts = candidate.get("content", {}).get("parts") or []
     return ("".join(part.get("text", "") for part in parts)).strip() or None
 
 
