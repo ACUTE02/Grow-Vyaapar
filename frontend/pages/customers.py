@@ -1,24 +1,78 @@
-"""Customers: search, segment filter, add, and the append-only record log."""
+"""Customers: search, segment filter, add, edit, and the append-only record log."""
 from __future__ import annotations
+
+from datetime import date
 
 import pandas as pd
 import streamlit as st
 
 from lib import api, ui
 
+SEGMENTS = ["All", "New", "Regular", "VIP", "Inactive"]
+
 ctx = ui.page_header("Customers")
 if ctx is None:
     st.stop()
 
 store_id = ctx["store_id"]
+store_name = ctx["store_name"]
+
+
+def _as_date(value) -> date | None:
+    """API dates arrive as ISO strings, or not at all. Never invent one."""
+    if not value:
+        return None
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _iso(value: date | None) -> str | None:
+    return str(value) if value else None
+
+
+def _valid_mobile(value: str) -> str | None:
+    """The same rule the API enforces: ten digits, starting 6-9."""
+    digits = "".join(character for character in value if character.isdigit())[-10:]
+    return digits if len(digits) == 10 and digits[0] in "6789" else None
+
+
+def _would_hide(search: str, customer: dict) -> bool:
+    """True when the current search no longer matches this customer, which is
+    how a just-saved customer disappears from an otherwise correct list."""
+    needle = (search or "").strip().lower()
+    if not needle:
+        return False
+    return needle not in customer["name"].lower() and needle not in customer["phone"].lower()
+
+
+# A message set just before a rerun, shown once on the way back. Without this
+# the success toast is wiped by the rerun that refreshes the list, which is
+# what made a successful save look like it had failed.
+flash = st.session_state.pop("customer_flash", None)
+if flash:
+    st.success(flash)
+
+# Every query on this page is scoped to this store, so say which one plainly.
+st.info(f"**Current store: {store_name}.** Customers are stored per store - "
+        "a customer added here is only visible while this store is selected.")
+
+# After a save, point the filters at the customer just saved. Applied here,
+# before the widgets exist: a widget's state cannot be assigned afterwards.
+# Clearing the search is not enough on its own - the list is one page of 50
+# ordered by name, so a new customer can still be off the end of it.
+retarget = st.session_state.pop("customer_filter_to", None)
+if retarget is not None:
+    st.session_state["customer_search"] = retarget
+    st.session_state["customer_segment"] = "All"
 
 filters = st.columns([3, 2, 2])
-query = filters[0].text_input("Search", placeholder="name or phone")
+query = filters[0].text_input("Search", placeholder="name or phone", key="customer_search")
 segment = filters[1].selectbox(
-    "Segment", ["All", "New", "Regular", "VIP", "Inactive"],
-    index=["All", "New", "Regular", "VIP", "Inactive"].index(
-        st.session_state.get("customer_segment", "All")
-    ),
+    "Segment", SEGMENTS, index=SEGMENTS.index(st.session_state.get("customer_segment", "All"))
 )
 st.session_state["customer_segment"] = segment
 limit = filters[2].number_input("Rows", min_value=10, max_value=500, value=50, step=10)
@@ -38,9 +92,11 @@ if customers is None:
 
 if not customers:
     ui.empty_state(
-        "No customer matches those filters.",
-        "Clear the search, or rebuild segments from the Dashboard if the segment "
-        "filter is empty for every value.",
+        f"No customer matches those filters in {store_name}.",
+        "Customers are not shared between stores, so check the store selector in the "
+        "sidebar if you expected to find someone added elsewhere. Otherwise clear the "
+        "search, or rebuild segments from the Dashboard if the segment filter is empty "
+        "for every value.",
     )
 else:
     frame = pd.DataFrame(customers)
@@ -61,17 +117,95 @@ else:
         height=380,
     )
 
+    # Keep the open customer open across the reruns that follow a save.
+    customer_ids = [customer["id"] for customer in customers]
+    remembered = st.session_state.get("selected_customer_id")
     chosen = st.selectbox(
         "Open a customer",
-        [customer["id"] for customer in customers],
+        customer_ids,
+        index=customer_ids.index(remembered) if remembered in customer_ids else 0,
         format_func=lambda value: next(
             f"{c['name']} · {c['phone']}" for c in customers if c["id"] == value
         ),
     )
+    st.session_state["selected_customer_id"] = chosen
     detail_left, detail_right = st.columns([2, 3], gap="large")
 
     with detail_left:
         current = next(c for c in customers if c["id"] == chosen)
+
+        with st.expander("Edit details"):
+            # Identity is correctable in place. The record log below is not:
+            # there a correction is a new row, and that stays true.
+            with st.form(f"edit_customer_{chosen}"):
+                edit_columns = st.columns(2)
+                new_name = edit_columns[0].text_input("Name", value=current["name"])
+                new_phone = edit_columns[1].text_input("Phone", value=current["phone"])
+                edit_dates = st.columns(2)
+                new_dob = edit_dates[0].date_input(
+                    "Date of birth",
+                    value=_as_date(current.get("dob")),
+                    format="DD/MM/YYYY",
+                    min_value=date(1900, 1, 1),
+                )
+                new_anniversary = edit_dates[1].date_input(
+                    "Anniversary",
+                    value=_as_date(current.get("anniversary")),
+                    format="DD/MM/YYYY",
+                    min_value=date(1900, 1, 1),
+                )
+                new_notes = st.text_area("Notes", value=current.get("notes") or "")
+
+                if st.form_submit_button("Save changes", type="primary"):
+                    name = new_name.strip()
+                    phone = _valid_mobile(new_phone)
+                    if len(name) < 2:
+                        ui.error_state("A customer needs a name of at least 2 characters.")
+                    elif phone is None:
+                        ui.error_state(
+                            f"'{new_phone}' is not a 10-digit Indian mobile number "
+                            "starting with 6-9."
+                        )
+                    else:
+                        # Only what actually changed: the API applies a partial
+                        # update, so an untouched field is never overwritten.
+                        candidate = {
+                            "name": name,
+                            "phone": phone,
+                            "dob": _iso(new_dob),
+                            "anniversary": _iso(new_anniversary),
+                            "notes": new_notes.strip() or None,
+                        }
+                        changes = {
+                            key: value
+                            for key, value in candidate.items()
+                            if value != (
+                                _iso(_as_date(current.get(key)))
+                                if key in ("dob", "anniversary")
+                                else current.get(key)
+                            )
+                        }
+                        if not changes:
+                            st.info("Nothing to update - no field changed.")
+                        else:
+                            ok, payload = api.patch(
+                                f"/customers/{chosen}",
+                                params={"store_id": store_id},
+                                json=changes,
+                            )
+                            if ok:
+                                st.session_state["selected_customer_id"] = payload["id"]
+                                if _would_hide(query, payload):
+                                    # e.g. the phone was searched for and then
+                                    # corrected - follow it rather than lose it.
+                                    st.session_state["customer_filter_to"] = payload["phone"]
+                                st.session_state["customer_flash"] = (
+                                    f"{payload['name']} was updated at {store_name}."
+                                )
+                                st.rerun()
+                            else:
+                                ui.error_state(str(payload))
+
         st.subheader("Consent")
         opted_in = st.toggle(
             "Send marketing messages to this customer",
@@ -159,14 +293,20 @@ else:
                     st.rerun()
 
 st.divider()
-with st.expander("Add a customer"):
+with st.expander(f"Add a customer to {store_name}"):
     with st.form("add_customer"):
+        st.caption(f"This customer will belong to **{store_name}** and will not be "
+                   "visible under any other store.")
         columns = st.columns(2)
         name = columns[0].text_input("Name")
         phone = columns[1].text_input("Phone", placeholder="10 digits, starts 6-9")
         dates = st.columns(2)
-        dob = dates[0].date_input("Date of birth", value=None, format="DD/MM/YYYY")
-        anniversary = dates[1].date_input("Anniversary", value=None, format="DD/MM/YYYY")
+        dob = dates[0].date_input(
+            "Date of birth", value=None, format="DD/MM/YYYY", min_value=date(1900, 1, 1)
+        )
+        anniversary = dates[1].date_input(
+            "Anniversary", value=None, format="DD/MM/YYYY", min_value=date(1900, 1, 1)
+        )
         if st.form_submit_button("Save customer", type="primary"):
             ok, payload = api.post(
                 "/customers",
@@ -174,12 +314,21 @@ with st.expander("Add a customer"):
                 json={
                     "name": name,
                     "phone": phone,
-                    "dob": str(dob) if dob else None,
-                    "anniversary": str(anniversary) if anniversary else None,
+                    "dob": _iso(dob),
+                    "anniversary": _iso(anniversary),
                 },
             )
             if ok:
-                st.success(f"Added {payload['name']}")
+                # Open the new customer and filter the list to them. A stale
+                # search or segment filter - or simply page one of fifty names -
+                # is the usual reason a just-added customer looks missing.
+                st.session_state["selected_customer_id"] = payload["id"]
+                st.session_state["customer_filter_to"] = payload["phone"]
+                st.session_state["customer_flash"] = (
+                    f"Customer {payload['name']} was successfully added to "
+                    f"{store_name}. The list below is filtered to show them - "
+                    "clear the search to see everyone."
+                )
                 st.rerun()
             else:
                 ui.error_state(str(payload))

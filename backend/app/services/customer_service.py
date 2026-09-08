@@ -132,6 +132,22 @@ def update_customer(
         if int(payload["family_head_id"]) == customer_id:
             raise ConflictError("A customer cannot be their own family head")
         get_customer(db, context, int(payload["family_head_id"]))
+    # (store_id, phone) is unique. Checked here so a clash reads as a clear
+    # conflict naming the other customer, rather than an IntegrityError at flush.
+    new_phone = payload.get("phone")
+    if new_phone and new_phone != customer.phone:
+        clash = db.scalar(
+            select(Customer).where(
+                Customer.store_id == context.store_id,
+                Customer.phone == new_phone,
+                Customer.id != customer_id,
+            )
+        )
+        if clash is not None:
+            raise ConflictError(
+                f"Phone {new_phone} already belongs to {clash.name} "
+                f"(customer {clash.id}) at this store"
+            )
     for key, value in payload.items():
         setattr(customer, key, value)
     db.flush()

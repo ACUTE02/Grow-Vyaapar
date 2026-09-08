@@ -10,6 +10,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 PHONE_RE = re.compile(r"^[6-9]\d{9}$")
 
 
+def normalise_mobile(value: str) -> str:
+    """Ten digits, starting 6-9. Shared so an edit is validated exactly as an add."""
+    digits = re.sub(r"\D", "", value)[-10:]
+    if not PHONE_RE.match(digits):
+        raise ValueError(
+            f"'{value}' is not a 10-digit Indian mobile number starting with 6-9"
+        )
+    return digits
+
+
 class CustomerIn(BaseModel):
     name: str = Field(min_length=2, max_length=128)
     phone: str = Field(min_length=10, max_length=13)
@@ -23,21 +33,26 @@ class CustomerIn(BaseModel):
     @field_validator("phone")
     @classmethod
     def _indian_mobile(cls, value: str) -> str:
-        digits = re.sub(r"\D", "", value)[-10:]
-        if not PHONE_RE.match(digits):
-            raise ValueError(
-                f"'{value}' is not a 10-digit Indian mobile number starting with 6-9"
-            )
-        return digits
+        return normalise_mobile(value)
 
 
 class CustomerUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=128)
+    # A mistyped phone number was previously uncorrectable: the field was absent
+    # here, so pydantic dropped it and the PATCH reported 200 having changed
+    # nothing. Same validation as CustomerIn, and the service checks the
+    # store-unique constraint before writing.
+    phone: str | None = Field(default=None, min_length=10, max_length=13)
     dob: date | None = None
     anniversary: date | None = None
     family_head_id: int | None = None
     notes: str | None = None
     marketing_opt_in: bool | None = None
+
+    @field_validator("phone")
+    @classmethod
+    def _indian_mobile(cls, value: str | None) -> str | None:
+        return normalise_mobile(value) if value is not None else None
 
 
 class CustomerOut(BaseModel):
