@@ -134,7 +134,7 @@ else:
     with detail_left:
         current = next(c for c in customers if c["id"] == chosen)
 
-        with st.expander("Edit details"):
+        with st.expander("✏️ Edit Customer"):
             # Identity is correctable in place. The record log below is not:
             # there a correction is a new row, and that stays true.
             with st.form(f"edit_customer_{chosen}"):
@@ -156,7 +156,15 @@ else:
                 )
                 new_notes = st.text_area("Notes", value=current.get("notes") or "")
 
-                if st.form_submit_button("Save changes", type="primary"):
+                form_buttons = st.columns([1, 1, 4])
+                save_clicked = form_buttons[0].form_submit_button(
+                    "Save Changes", type="primary"
+                )
+                cancel_clicked = form_buttons[1].form_submit_button("Cancel")
+
+                if cancel_clicked:
+                    st.info("Edit cancelled - no changes were made.")
+                elif save_clicked:
                     name = new_name.strip()
                     phone = _valid_mobile(new_phone)
                     if len(name) < 2:
@@ -200,7 +208,8 @@ else:
                                     # corrected - follow it rather than lose it.
                                     st.session_state["customer_filter_to"] = payload["phone"]
                                 st.session_state["customer_flash"] = (
-                                    f"{payload['name']} was updated at {store_name}."
+                                    f"Customer '{payload['name']}' updated successfully "
+                                    f"at {store_name}."
                                 )
                                 st.rerun()
                             else:
