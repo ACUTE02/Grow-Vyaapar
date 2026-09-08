@@ -438,6 +438,96 @@ def test_twilio_surfaces_the_providers_error_code_and_message(outbox, monkeypatc
     assert "not a valid phone number" in result.detail
 
 
+def test_without_a_content_sid_it_sends_free_form_body_as_before(outbox, monkeypatch) -> None:
+    db, store, context = outbox
+    monkeypatch.setattr(settings, "twilio_account_sid", "ACtest")
+    monkeypatch.setattr(settings, "twilio_auth_token", "test-token")
+    monkeypatch.setattr(settings, "twilio_whatsapp_from", "+15005550006")
+    monkeypatch.setattr(settings, "twilio_content_sid", None)
+
+    captured = {}
+
+    def spy(*args, **kwargs):
+        captured.update(kwargs["data"])
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://api.twilio.com"),
+            json={"sid": "SMtest"},
+        )
+
+    monkeypatch.setattr(httpx, "post", spy)
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    result = twilio_wa.TwilioWhatsAppAdapter().send(reminder, db)
+
+    assert result.status == "sent"
+    assert captured.get("Body") == reminder.message
+    assert "ContentSid" not in captured
+
+
+def test_a_configured_content_sid_is_used_instead_of_free_form_body(outbox, monkeypatch) -> None:
+    """The real fix for Twilio error 21654: outside an active WhatsApp
+    session, only an approved Content Template is accepted."""
+    db, store, context = outbox
+    monkeypatch.setattr(settings, "twilio_account_sid", "ACtest")
+    monkeypatch.setattr(settings, "twilio_auth_token", "test-token")
+    monkeypatch.setattr(settings, "twilio_whatsapp_from", "+15005550006")
+    monkeypatch.setattr(settings, "twilio_content_sid", "HXfe5ab5f00277942d4d4200328b4d403c")
+
+    captured = {}
+
+    def spy(*args, **kwargs):
+        captured.update(kwargs["data"])
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://api.twilio.com"),
+            json={"sid": "SMtest"},
+        )
+
+    monkeypatch.setattr(httpx, "post", spy)
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    result = twilio_wa.TwilioWhatsAppAdapter().send(reminder, db)
+
+    assert result.status == "sent"
+    assert captured.get("ContentSid") == "HXfe5ab5f00277942d4d4200328b4d403c"
+    assert "Body" not in captured, "a template send must not also carry free-form Body"
+
+
+def test_the_21654_failure_is_gone_once_a_content_sid_is_configured(outbox, monkeypatch) -> None:
+    """Reproduces the exact real-world failure, then confirms the fix."""
+    db, store, context = outbox
+    monkeypatch.setattr(settings, "twilio_account_sid", "ACtest")
+    monkeypatch.setattr(settings, "twilio_auth_token", "test-token")
+    monkeypatch.setattr(settings, "twilio_whatsapp_from", "+15005550006")
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+
+    def rejected(*args, **kwargs):
+        assert "ContentSid" not in kwargs["data"], "no template configured yet"
+        return httpx.Response(
+            400,
+            request=httpx.Request("POST", "https://api.twilio.com"),
+            json={"code": 21654, "message": "ContentSid Required"},
+        )
+
+    monkeypatch.setattr(settings, "twilio_content_sid", None)
+    monkeypatch.setattr(httpx, "post", rejected)
+    before = twilio_wa.TwilioWhatsAppAdapter().send(reminder, db)
+    assert before.status == "failed"
+    assert "21654" in before.detail
+
+    def accepted(*args, **kwargs):
+        assert kwargs["data"].get("ContentSid") == "HXfe5ab5f00277942d4d4200328b4d403c"
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://api.twilio.com"),
+            json={"sid": "SMtest"},
+        )
+
+    monkeypatch.setattr(settings, "twilio_content_sid", "HXfe5ab5f00277942d4d4200328b4d403c")
+    monkeypatch.setattr(httpx, "post", accepted)
+    after = twilio_wa.TwilioWhatsAppAdapter().send(reminder, db)
+    assert after.status == "sent"
+
+
 # -- the WhatsApp Cloud adapter ----------------------------------------------
 def test_phone_numbers_are_normalised_to_e164() -> None:
     assert whatsapp_cloud.to_e164("9876543210") == "919876543210"

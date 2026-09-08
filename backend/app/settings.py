@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
     twilio_whatsapp_from: str | None = None
+    # WhatsApp only allows free-form Body text inside a 24-hour customer-
+    # initiated session; outside it (the common case for a reminder the
+    # customer didn't start), Twilio requires an approved Content Template,
+    # referenced by this id, instead. Optional: unset keeps sending Body.
+    twilio_content_sid: str | None = None
 
     # Meta WhatsApp Cloud API
     whatsapp_token: str | None = None

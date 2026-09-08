@@ -51,14 +51,24 @@ class TwilioWhatsAppAdapter(Adapter):
         # own dashboard hands it out pre-fixed with "whatsapp:" - accept either so
         # the two prefixes never stack into "whatsapp:whatsapp:+1...".
         from_number = settings.twilio_whatsapp_from.removeprefix("whatsapp:")
+
+        data = {"From": f"whatsapp:{from_number}", "To": f"whatsapp:{to_number}"}
+        if settings.twilio_content_sid:
+            # No active 24-hour session can be assumed for a reminder the
+            # customer didn't initiate, so a free-form Body would be rejected
+            # (error 21654: "ContentSid Required"). A Content Template is
+            # accepted at any time, session or not - but its approved text is
+            # fixed by Twilio/Meta, so this path does not carry
+            # reminder.message; that is a WhatsApp platform rule, not a
+            # choice made here.
+            data["ContentSid"] = settings.twilio_content_sid
+        else:
+            data["Body"] = reminder.message
+
         try:
             response = httpx.post(
                 TWILIO_URL.format(sid=settings.twilio_account_sid),
-                data={
-                    "From": f"whatsapp:{from_number}",
-                    "To": f"whatsapp:{to_number}",
-                    "Body": reminder.message,
-                },
+                data=data,
                 auth=(settings.twilio_account_sid, settings.twilio_auth_token),
                 timeout=15.0,
             )
