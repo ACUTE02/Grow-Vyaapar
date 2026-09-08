@@ -15,6 +15,10 @@ store_id = ctx["store_id"]
 unit = ctx["unit_labels"]["default"]
 cart: dict[int, dict] = st.session_state.setdefault("cart", {})
 
+# Quick-pick window for the customer dropdown. Searching is server side and
+# is not capped by this - see the customer picker below.
+INITIAL_CUSTOMERS = 300
+
 left, right = st.columns([3, 2], gap="large")
 
 # --------------------------------------------------------------------------- #
@@ -78,14 +82,74 @@ with right:
 
         st.metric("Subtotal (before GST)", ui.money(subtotal))
 
-        customers = ui.fetch("/customers", {"store_id": store_id, "limit": 200}) or []
+        # Two ways in, both scoped to this store. The dropdown is a quick-pick
+        # window of the first INITIAL_CUSTOMERS by name; the search box goes to
+        # the server, which filters every customer this store has before it
+        # applies any limit - so customer 301 is reachable even though the
+        # quick-pick list stops at 300.
+        if st.session_state.get("pos_customer_store") != store_id:
+            # A different store means a different customer set entirely.
+            st.session_state["pos_customer_store"] = store_id
+            st.session_state["pos_customer_id"] = 0
+            st.session_state.pop("pos_customer_query", None)
+
+        customer_query = st.text_input(
+            "Find a customer",
+            placeholder="name or phone",
+            key="pos_customer_query",
+            help=(
+                "Searches every customer in this store, including those past the "
+                f"first {INITIAL_CUSTOMERS} shown in the dropdown."
+            ),
+        ).strip()
+
+        customer_params = {"store_id": store_id, "limit": INITIAL_CUSTOMERS}
+        if customer_query:
+            customer_params["q"] = customer_query
+        customers = ui.fetch("/customers", customer_params) or []
+
         options = {0: "Walk-in (no customer)"} | {
             customer["id"]: f"{customer['name']} · {customer['phone']}"
             for customer in customers
         }
+
+        # Keep whoever is already on the bill selectable even when the current
+        # window does not contain them - clearing a search must not quietly
+        # turn a named sale into a walk-in. Fetching them by id is store-scoped
+        # too, so a customer left over from another store simply drops out.
+        selected_id = st.session_state.get("pos_customer_id", 0)
+        if selected_id and selected_id not in options:
+            ok, pinned = api.get(f"/customers/{selected_id}", {"store_id": store_id})
+            if ok:
+                options[pinned["id"]] = f"{pinned['name']} · {pinned['phone']}"
+            else:
+                selected_id = 0
+                st.session_state["pos_customer_id"] = 0
+
+        if customer_query and not customers:
+            st.caption(f"No customer in {ctx['store_name']} matches that search.")
+        elif customer_query:
+            st.caption(
+                f"{len(customers)} match(es) in {ctx['store_name']}"
+                + (", showing the first "
+                   f"{INITIAL_CUSTOMERS} - narrow the search for more."
+                   if len(customers) >= INITIAL_CUSTOMERS else "")
+            )
+        elif len(customers) >= INITIAL_CUSTOMERS:
+            st.caption(
+                f"First {INITIAL_CUSTOMERS} customers by name. Use the search box "
+                "above to reach anyone else in this store."
+            )
+
+        option_ids = list(options)
         customer_id = st.selectbox(
-            "Customer", list(options), format_func=lambda value: options[value]
+            "Customer",
+            option_ids,
+            index=option_ids.index(selected_id) if selected_id in option_ids else 0,
+            # .get, not [] - a stale widget value must never crash the page.
+            format_func=lambda value: options.get(value, "Walk-in (no customer)"),
         )
+        st.session_state["pos_customer_id"] = customer_id
         discount = st.number_input("Bill discount", min_value=0.0, step=10.0, value=0.0)
         coupon_code = st.text_input("Coupon code", placeholder="DIWALI20").strip().upper()
         if coupon_code:
@@ -145,6 +209,10 @@ with right:
                 else:
                     st.session_state["cart"] = {}
                     st.session_state["last_invoice"] = payload
+                    # The next bill is a new customer until someone says
+                    # otherwise - never inherit the last one's selection.
+                    st.session_state["pos_customer_id"] = 0
+                    st.session_state.pop("pos_customer_query", None)
                     st.rerun()
 
 # --------------------------------------------------------------------------- #
