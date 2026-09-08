@@ -55,6 +55,7 @@ class StockForecastOut(BaseModel):
     suggested_reorder_qty: float
     is_dead_stock_risk: bool
     reason: str
+    source: str = "estimate"          # "model" | "estimate" - which one produced this row
     computed_at: datetime | None = None
 
 
@@ -65,3 +66,10 @@ class ForecastRunOut(BaseModel):
     reorder_soon: int
     dead_stock_risk: int
     computed_at: datetime
+
+
+class StockForecastTrainOut(BaseModel):
+    store_id: int
+    model_name: str
+    model_version: str
+    metrics: dict[str, Any]

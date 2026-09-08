@@ -15,18 +15,27 @@ unit = ctx["unit_labels"]["default"]
 cycle = ctx["config"].get("reorder_cycle_days")
 
 st.caption(
-    f"Velocity is a day-of-week weighted moving average over this store's own "
-    f"lookback window. Anything that runs out inside the {cycle}-day reorder cycle "
-    "is listed first. It is a moving average, not a time-series model - the point "
-    "is that it is explainable, not that it is clever."
+    f"A trained RandomForest predicts next week's demand for SKUs with at least 8 weeks of "
+    "their own sales history; everything else falls back to a day-of-week weighted moving "
+    "average. Every row says which one produced it. Anything that runs out inside the "
+    f"{cycle}-day reorder cycle is listed first."
 )
 
-if st.button("Recompute forecasts", type="primary"):
+controls = st.columns([1, 1, 3])
+if controls[0].button("Recompute forecasts", type="primary"):
     ok, payload = api.post("/ml/forecast/run", params={"store_id": store_id})
     st.toast(
         f"{payload['products']} products, {payload['reorder_soon']} to reorder" if ok
         else str(payload)
     )
+if controls[1].button("Train forecast model"):
+    with st.spinner("Training..."):
+        ok, payload = api.post("/ml/stock_forecast/train", params={"store_id": store_id})
+    if ok:
+        metrics = payload["metrics"]
+        st.toast(f"Trained: R² {metrics['r2']}, MAE {metrics['mae']}")
+    else:
+        ui.error_state(str(payload))
 
 buy_tab, risk_tab, all_tab = st.tabs(
     [f"Order now (within {cycle} days)", "Predicted to go stale", "Every product"]
@@ -36,10 +45,11 @@ with buy_tab:
     rows = ui.fetch("/ml/forecast/stock", {"store_id": store_id, "view": "reorder", "limit": 100})
     if rows:
         frame = pd.DataFrame(rows)
+        frame["basis"] = frame["source"].map({"model": "🤖 model", "estimate": "estimate"})
         st.dataframe(
             frame[
                 ["sku", "name", "qty_on_hand", "predicted_daily_velocity",
-                 "days_to_stockout", "suggested_reorder_qty", "reason"]
+                 "days_to_stockout", "suggested_reorder_qty", "basis", "reason"]
             ].rename(
                 columns={
                     "qty_on_hand": f"on hand ({unit})",
@@ -51,6 +61,12 @@ with buy_tab:
             hide_index=True,
             use_container_width=True,
             height=420,
+        )
+        modelled = int((frame["source"] == "model").sum())
+        st.caption(
+            f"{modelled} of {len(rows)} row(s) use the trained model; the rest fall back to the "
+            "moving average (too little history for that SKU yet, or no model trained for this "
+            "store - press 'Train forecast model' below)."
         )
         st.metric("Lines to raise", len(rows))
     elif rows is not None:
@@ -87,10 +103,11 @@ with all_tab:
     rows = ui.fetch("/ml/forecast/stock", {"store_id": store_id, "view": "all", "limit": 500})
     if rows:
         frame = pd.DataFrame(rows)
+        frame["basis"] = frame["source"].map({"model": "🤖 model", "estimate": "estimate"})
         st.dataframe(
             frame[
                 ["sku", "name", "qty_on_hand", "predicted_daily_velocity",
-                 "days_to_stockout", "is_dead_stock_risk", "reason"]
+                 "days_to_stockout", "is_dead_stock_risk", "basis", "reason"]
             ],
             hide_index=True,
             use_container_width=True,

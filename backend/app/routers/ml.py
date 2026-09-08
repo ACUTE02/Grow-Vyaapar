@@ -19,6 +19,7 @@ from app.schemas.ml import (
     ModelRunOut,
     QueueWinbackOut,
     StockForecastOut,
+    StockForecastTrainOut,
 )
 from app.services.errors import NotFoundError
 from app.verticals.context import StoreContext, get_store_context_from_query
@@ -224,3 +225,20 @@ def forecast_run(
     result = forecast_agent.run(db, context)
     db.commit()
     return result
+
+
+@router.post("/stock_forecast/train", response_model=StockForecastTrainOut)
+def train_stock_forecast(
+    context: StoreContext = Depends(get_store_context_from_query),
+    db: Session = Depends(get_db),
+) -> dict:
+    from app.ml import stock_forecast_model  # noqa: PLC0415
+
+    metrics = stock_forecast_model.train_store(db, context)
+    db.commit()
+    return {
+        "store_id": context.store_id,
+        "model_name": stock_forecast_model.MODEL_NAME,
+        "model_version": stock_forecast_model.MODEL_VERSION,
+        "metrics": metrics,
+    }

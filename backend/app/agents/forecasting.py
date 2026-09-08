@@ -22,6 +22,7 @@ from typing import Any
 from sqlalchemy import Select, delete, func, select
 from sqlalchemy.orm import Session
 
+from app.ml import stock_forecast_model
 from app.models.base import utcnow
 from app.models.core import Product, StockLevel, Transaction, TransactionItem
 from app.models.ml import StockForecast
@@ -48,6 +49,7 @@ class Forecast:
     suggested_reorder_qty: float
     is_dead_stock_risk: bool
     reason: str
+    source: str = "estimate"          # "model" (trained regressor) | "estimate" (moving average)
 
 
 def window_days(context: StoreContext) -> int:
@@ -160,6 +162,18 @@ def compute(db: Session, context: StoreContext) -> list[Forecast]:
     now = utcnow()
     split = today - timedelta(days=half)
 
+    # A trained model's own prediction, for the products it has enough history
+    # to be trusted on; everyone else keeps the moving average. Never lets a
+    # scoring problem break the forecast - the moving average is always safe.
+    try:
+        model_predictions = stock_forecast_model.predict_weekly_units(db, context)
+    except Exception:
+        logger.exception(
+            "Stock forecast model scoring failed for store %s, using the moving average",
+            context.store_id,
+        )
+        model_predictions = {}
+
     rows = db.execute(
         select(Product, StockLevel)
         .outerjoin(StockLevel, StockLevel.product_id == Product.id)
@@ -170,7 +184,7 @@ def compute(db: Session, context: StoreContext) -> list[Forecast]:
     for product, stock in rows:
         per_day = sales.get(product.id, {})
         sold_total = sum(per_day.values())
-        velocity = sold_total / days if days else 0.0
+        historical_velocity = sold_total / days if days else 0.0
 
         recent = sum(quantity for day, quantity in per_day.items() if day >= split)
         earlier = sum(quantity for day, quantity in per_day.items() if day < split)
@@ -180,6 +194,12 @@ def compute(db: Session, context: StoreContext) -> list[Forecast]:
         qty_on_hand = float(stock.qty_on_hand) if stock else 0.0
         last_sold = stock.last_sold_at if stock else None
         idle_days = (now - last_sold).days if last_sold else None
+
+        predicted_weekly = model_predictions.get(product.id)
+        if predicted_weekly is not None:
+            velocity, source = predicted_weekly / 7.0, "model"
+        else:
+            velocity, source = historical_velocity, "estimate"
 
         stockout = days_until_empty(qty_on_hand, velocity, factors)
 
@@ -192,7 +212,11 @@ def compute(db: Session, context: StoreContext) -> list[Forecast]:
             and idle_days >= dead_stock_days * APPROACHING_SHARE
             and idle_days < dead_stock_days
         )
-        never_moved = velocity <= 0 and qty_on_hand > 0
+        # Whether this SKU has genuinely never sold is a fact about its actual
+        # sales history, not about what a model predicts next week - always
+        # judged from the real velocity, regardless of which one drives the
+        # reorder math below.
+        never_moved = historical_velocity <= 0 and qty_on_hand > 0
         # Already past the window is not a prediction, it is the phase-1 report.
         already_dead = idle_days is not None and idle_days >= dead_stock_days
 
@@ -239,6 +263,7 @@ def compute(db: Session, context: StoreContext) -> list[Forecast]:
                 suggested_reorder_qty=suggested,
                 is_dead_stock_risk=dead_risk,
                 reason=reason,
+                source=source,
             )
         )
 
