@@ -6,9 +6,10 @@ import logging
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.middleware import AuditMiddleware, AuthorizationMiddleware
-from app.observability import RequestIdMiddleware, configure_logging
+from app.observability import PAGINATION_HEADERS, RequestIdMiddleware, configure_logging
 from app.services.errors import ConflictError, NotFoundError, ValidationError
 from app.settings import settings
 from app.verticals.context import StoreNotFound
@@ -35,10 +36,13 @@ app.add_middleware(RequestIdMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.allowed_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Without this a browser client can read the list body but not the
+    # pagination that goes with it, so a page-numbered UI has no total.
+    expose_headers=[*PAGINATION_HEADERS, "X-Request-Id"],
 )
 
 
@@ -87,6 +91,16 @@ async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
     )
 
 
+# Composed campaign posters are written here and served straight back. Public
+# on purpose: a poster is a picture a shopkeeper is about to share anyway, the
+# filename is a hash rather than a guessable id, and an <img> tag carries no
+# Authorization header for us to check.
+from app.services.poster import POSTER_DIR, STATIC_DIR  # noqa: E402
+
+POSTER_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
 @app.get("/health", tags=["meta"])
 def health() -> dict[str, str]:
     return {"status": "ok", "app": settings.app_name}
@@ -121,3 +135,5 @@ def _register_routers() -> None:
 
 
 _register_routers()
+
+

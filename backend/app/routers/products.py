@@ -112,7 +112,15 @@ def list_products(
         limit=limit,
         offset=offset,
     )
-    set_pagination(response, total=None, limit=limit, offset=offset, returned=len(rows))
+    set_pagination(
+        response,
+        total=product_service.count_products(
+            db, context, query=q, category_id=category_id, active_only=not include_inactive
+        ),
+        limit=limit,
+        offset=offset,
+        returned=len(rows),
+    )
     return rows
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app import audit
@@ -114,6 +114,31 @@ def search_products(
         statement = statement.where(Product.category_id == category_id)
     statement = statement.order_by(Product.name).limit(limit).offset(offset)
     return [_to_out(product, stock, context) for product, stock in db.execute(statement).all()]
+
+
+def count_products(
+    db: Session,
+    context: StoreContext,
+    *,
+    query: str | None = None,
+    category_id: int | None = None,
+    active_only: bool = True,
+) -> int:
+    """The total behind a page. Same filters as search_products, no join to
+    stock levels: a count does not need them."""
+    statement = (
+        select(func.count(Product.id))
+        .select_from(Product)
+        .where(Product.store_id == context.store_id)
+    )
+    if active_only:
+        statement = statement.where(Product.is_active.is_(True))
+    if query:
+        pattern = f"%{query.strip()}%"
+        statement = statement.where(or_(Product.name.ilike(pattern), Product.sku.ilike(pattern)))
+    if category_id:
+        statement = statement.where(Product.category_id == category_id)
+    return int(db.scalar(statement) or 0)
 
 
 def get_product(db: Session, context: StoreContext, product_id: int) -> Product:

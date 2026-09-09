@@ -21,6 +21,13 @@ request_id: ContextVar[str] = ContextVar("request_id", default="-")
 MAX_LIMIT = 500
 DEFAULT_LIMIT = 50
 
+# A browser hides every response header except a short safelist unless the
+# server names the rest in Access-Control-Expose-Headers. The Streamlit front
+# end never hit this because it called the API server-side; a browser client
+# reading X-Total-Count does. Listed here so the CORS config and set_pagination
+# cannot drift apart.
+PAGINATION_HEADERS = ("X-Limit", "X-Offset", "X-Returned", "X-Total-Count", "X-Has-More")
+
 
 class RequestIdFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:

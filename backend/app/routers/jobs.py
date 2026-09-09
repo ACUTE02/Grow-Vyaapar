@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query, status as http_status
+from fastapi import APIRouter, Depends, Query, Response, status as http_status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.observability import set_pagination
 from app.services import jobs_service
 from app.verticals.context import StoreContext, get_store_context_from_query
 
@@ -49,10 +50,15 @@ def list_jobs(
     status: str | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    response: Response = None,
     context: StoreContext = Depends(get_store_context_from_query),
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    return jobs_service.list_jobs(db, context, status=status, limit=limit, offset=offset)
+    rows = jobs_service.list_jobs(db, context, status=status, limit=limit, offset=offset)
+    # No total: the board endpoint already returns counts per column, and a
+    # second count query here would only duplicate it.
+    set_pagination(response, total=None, limit=limit, offset=offset, returned=len(rows))
+    return rows
 
 
 @router.get("/board")
