@@ -76,11 +76,16 @@ class StockForecastStatusOut(BaseModel):
     explanation: str
     model_name: str | None = None
     model_version: str | None = None
+    estimator: str | None = None
     trained_at: datetime | None = None
     rows_trained: int | None = None
     mae: float | None = None
+    rmse: float | None = None
     baseline_mae: float | None = None
     r2: float | None = None
+    improvement_vs_baseline_pct: float | None = None
+    holdout_rows: int | None = None
+    evaluation: str | None = None
 
 
 class StockForecastTrainOut(BaseModel):

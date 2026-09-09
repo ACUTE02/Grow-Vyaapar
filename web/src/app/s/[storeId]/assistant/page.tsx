@@ -223,7 +223,11 @@ export default function AssistantPage({ params }: { params: Promise<{ storeId: s
           {forecastStatus.data ? (
             <Badge tone={forecastStatus.data.in_use ? "success" : "warning"}>
               {forecastStatus.data.in_use
-                ? "Trained model in use"
+                ? `Trained model in use${
+                    forecastStatus.data.improvement_vs_baseline_pct
+                      ? ` · ${forecastStatus.data.improvement_vs_baseline_pct.toFixed(1)}% better than the baseline`
+                      : ""
+                  }`
                 : forecastStatus.data.trained
                   ? "Model trained, not in use"
                   : "No trained model"}
@@ -231,10 +235,26 @@ export default function AssistantPage({ params }: { params: Promise<{ storeId: s
           ) : null}
         </Card.Header>
 
-        {forecastStatus.data && !forecastStatus.data.in_use ? (
+        {/* Shown whichever way the verdict went. A model that is working has
+            earned the numbers being on screen, and one that is being ignored
+            needs them there even more. */}
+        {forecastStatus.data ? (
           <div className="px-4 pb-3">
-            <Notice tone={forecastStatus.data.trained ? "warning" : "info"}>
+            <Notice
+              tone={
+                forecastStatus.data.in_use
+                  ? "success"
+                  : forecastStatus.data.trained
+                    ? "warning"
+                    : "info"
+              }
+            >
               {forecastStatus.data.explanation}
+              {forecastStatus.data.evaluation ? (
+                <span className="mt-1 block text-xs opacity-80">
+                  Evaluation: {forecastStatus.data.evaluation}.
+                </span>
+              ) : null}
             </Notice>
           </div>
         ) : null}

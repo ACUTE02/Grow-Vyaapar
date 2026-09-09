@@ -255,18 +255,25 @@ def stock_forecast_status(
 
     metrics = run.metrics or {}
     in_use = stock_forecast_model.model_is_usable(db, context.store_id)
+    improvement = metrics.get("improvement_vs_baseline_pct")
+    estimator = metrics.get("chosen_model", run.model_name)
+
     if in_use:
         explanation = (
-            f"Trained on {run.rows_trained} product-weeks. MAE {metrics.get('mae')} against "
-            f"{metrics.get('baseline_mae')} for predicting the mean, so it is used for products "
-            f"with at least {stock_forecast_model.MIN_WEEKS_HISTORY} weeks of their own history."
+            f"A {estimator.replace('_', ' ')} chosen on a validation period and scored once on "
+            f"{metrics.get('holdout_rows')} held-out product-weeks it never saw. Its error "
+            f"(MAE {metrics.get('mae')}) beats predicting the mean "
+            f"(MAE {metrics.get('baseline_mae')}) by {improvement}%, so it drives the forecast "
+            f"for products with at least {stock_forecast_model.MIN_WEEKS_HISTORY} weeks of "
+            "their own history."
         )
     else:
         explanation = (
-            f"A model was trained on {run.rows_trained} product-weeks but is not used: its "
-            f"error (MAE {metrics.get('mae')}) is worse than simply predicting the mean "
-            f"(MAE {metrics.get('baseline_mae')}), so it would make the reorder numbers less "
-            "accurate rather than more. Every row falls back to the moving-average estimate."
+            f"A {estimator.replace('_', ' ')} was trained on {run.rows_trained} product-weeks "
+            f"but is not used: on the held-out period its error (MAE {metrics.get('mae')}) is "
+            f"worse than simply predicting the mean (MAE {metrics.get('baseline_mae')}), so it "
+            "would make the reorder numbers less accurate rather than more. Every row falls "
+            "back to the moving-average estimate."
         )
 
     return {
@@ -274,11 +281,16 @@ def stock_forecast_status(
         "in_use": in_use,
         "model_name": run.model_name,
         "model_version": run.model_version,
+        "estimator": estimator,
         "trained_at": run.trained_at,
         "rows_trained": run.rows_trained,
         "mae": metrics.get("mae"),
+        "rmse": metrics.get("rmse"),
         "baseline_mae": metrics.get("baseline_mae"),
         "r2": metrics.get("r2"),
+        "improvement_vs_baseline_pct": improvement,
+        "holdout_rows": metrics.get("holdout_rows"),
+        "evaluation": metrics.get("split"),
         "explanation": explanation,
     }
 

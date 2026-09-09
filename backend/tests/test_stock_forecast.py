@@ -21,6 +21,11 @@ from tests.test_segmentation import _store
 
 PHONES = iter(range(2_000_000, 3_000_000))
 
+# Enough weeks for a full 12-week trailing window plus a chronological
+# train/validation/holdout split with none of the three empty. Forty weeks was
+# enough for version 1, whose window was four weeks and whose split was random.
+TRAINABLE_WEEKS = 60
+
 
 def _product(
     db, store, sku: str, qty_on_hand: float = 100.0, sell_price: str = "100.00"
@@ -100,7 +105,7 @@ def test_training_needs_a_minimum_number_of_rows(db) -> None:
 def test_training_produces_a_model_run_and_a_saved_artefact(db) -> None:
     store = _store(db, "grocery", "Sharma Kirana")
     product = _product(db, store, "REG-1")
-    _weekly_sales(db, store, product, weeks=40, qty=5.0)
+    _weekly_sales(db, store, product, weeks=TRAINABLE_WEEKS, qty=5.0)
     db.commit()
     context = resolve_store_context(db, store.id)
 
@@ -123,7 +128,7 @@ def test_training_produces_a_model_run_and_a_saved_artefact(db) -> None:
 def test_retraining_is_deterministic(db) -> None:
     store = _store(db, "grocery", "Sharma Kirana")
     product = _product(db, store, "DET-1")
-    _weekly_sales(db, store, product, weeks=40, qty=5.0)
+    _weekly_sales(db, store, product, weeks=TRAINABLE_WEEKS, qty=5.0)
     db.commit()
     context = resolve_store_context(db, store.id)
 
@@ -141,7 +146,7 @@ def test_retraining_is_deterministic(db) -> None:
 def test_a_product_with_too_little_history_is_not_scored_by_the_model(db) -> None:
     store = _store(db, "grocery", "Sharma Kirana")
     trained_on = _product(db, store, "REG-2")
-    _weekly_sales(db, store, trained_on, weeks=40, qty=5.0)
+    _weekly_sales(db, store, trained_on, weeks=TRAINABLE_WEEKS, qty=5.0)
     new_product = _product(db, store, "NEW-1")
     _weekly_sales(db, store, new_product, weeks=2, qty=3.0)  # far under 8 weeks
     db.commit()
@@ -170,7 +175,7 @@ def test_forecast_falls_back_to_the_moving_average_without_a_trained_model(db) -
 def test_forecast_uses_the_model_once_trained_and_confident(db) -> None:
     store = _store(db, "grocery", "Sharma Kirana")
     product = _product(db, store, "MODELLED-1")
-    _weekly_sales(db, store, product, weeks=40, qty=5.0)
+    _weekly_sales(db, store, product, weeks=TRAINABLE_WEEKS, qty=5.0)
     db.commit()
     context = resolve_store_context(db, store.id)
     stock_forecast_model.train_store(db, context)
@@ -187,7 +192,7 @@ def test_a_brand_new_product_falls_back_even_after_training(db) -> None:
     not silently scored by a model that has never seen it sell."""
     store = _store(db, "grocery", "Sharma Kirana")
     trained_on = _product(db, store, "REG-3")
-    _weekly_sales(db, store, trained_on, weeks=40, qty=5.0)
+    _weekly_sales(db, store, trained_on, weeks=TRAINABLE_WEEKS, qty=5.0)
     brand_new = _product(db, store, "BRANDNEW-1")  # zero sales ever
     db.commit()
     context = resolve_store_context(db, store.id)
@@ -204,7 +209,7 @@ def test_a_brand_new_product_falls_back_even_after_training(db) -> None:
 def test_the_endpoint_trains_and_reports_metrics(client, db) -> None:
     store = _store(db, "grocery", "Sharma Kirana")
     product = _product(db, store, "API-1")
-    _weekly_sales(db, store, product, weeks=40, qty=5.0)
+    _weekly_sales(db, store, product, weeks=TRAINABLE_WEEKS, qty=5.0)
     db.commit()
 
     response = client.post(f"/ml/stock_forecast/train?store_id={store.id}")
@@ -217,7 +222,7 @@ def test_the_endpoint_trains_and_reports_metrics(client, db) -> None:
 def test_forecast_stock_endpoint_reports_the_source(client, db) -> None:
     store = _store(db, "grocery", "Sharma Kirana")
     product = _product(db, store, "API-2")
-    _weekly_sales(db, store, product, weeks=40, qty=5.0)
+    _weekly_sales(db, store, product, weeks=TRAINABLE_WEEKS, qty=5.0)
     db.commit()
     client.post(f"/ml/stock_forecast/train?store_id={store.id}")
 
@@ -240,7 +245,7 @@ def test_training_never_writes_into_the_app_model_directory(db) -> None:
 
     store = _store(db, "grocery", "Sharma Kirana")
     product = _product(db, store, "ISO-1")
-    _weekly_sales(db, store, product, weeks=40, qty=5.0)
+    _weekly_sales(db, store, product, weeks=TRAINABLE_WEEKS, qty=5.0)
     db.commit()
     context = resolve_store_context(db, store.id)
 
@@ -260,7 +265,7 @@ def test_training_records_how_the_model_compares_with_a_mean_baseline(db) -> Non
     store = _store(db, "grocery", "Sharma Kirana")
     for index in range(3):
         product = _product(db, store, f"BASE-{index}")
-        _weekly_sales(db, store, product, weeks=40, qty=5.0 + index)
+        _weekly_sales(db, store, product, weeks=TRAINABLE_WEEKS, qty=5.0 + index)
     db.commit()
     context = resolve_store_context(db, store.id)
 
@@ -279,7 +284,7 @@ def test_a_model_that_loses_to_the_baseline_is_not_served(db) -> None:
     must not decide how much stock a shop buys."""
     store = _store(db, "grocery", "Sharma Kirana")
     product = _product(db, store, "GATE-1")
-    _weekly_sales(db, store, product, weeks=40, qty=5.0)
+    _weekly_sales(db, store, product, weeks=TRAINABLE_WEEKS, qty=5.0)
     db.commit()
     context = resolve_store_context(db, store.id)
 
@@ -301,7 +306,7 @@ def test_a_model_that_loses_to_the_baseline_is_not_served(db) -> None:
 def test_status_endpoint_explains_why_the_model_is_not_used(client, db) -> None:
     store = _store(db, "grocery", "Sharma Kirana")
     product = _product(db, store, "STAT-1")
-    _weekly_sales(db, store, product, weeks=40, qty=5.0)
+    _weekly_sales(db, store, product, weeks=TRAINABLE_WEEKS, qty=5.0)
     db.commit()
 
     before = client.get(f"/ml/stock_forecast/status?store_id={store.id}")
@@ -319,3 +324,159 @@ def test_status_endpoint_explains_why_the_model_is_not_used(client, db) -> None:
     assert after["trained"] is True
     assert after["in_use"] is False
     assert "worse than simply predicting the mean" in after["explanation"]
+
+
+# -- version 2: time-aware evaluation ----------------------------------------
+def test_the_split_is_chronological_and_no_week_straddles_a_boundary(db) -> None:
+    """A random split lets the model learn from a week and then be tested on
+    the week before it, which is not something a forecast can do. Version 1
+    used one, and its flattering numbers were partly that."""
+    store = _store(db, "grocery", "Sharma Kirana")
+    for index in range(3):
+        product = _product(db, store, f"SPLIT-{index}")
+        _weekly_sales(db, store, product, weeks=TRAINABLE_WEEKS, qty=4.0 + index)
+    db.commit()
+    context = resolve_store_context(db, store.id)
+
+    _features, _labels, weeks, _edges = stock_forecast_model.build_training_set(db, context)
+    train, validation, holdout = stock_forecast_model.chronological_split(weeks)
+
+    train_weeks = {week for week, flag in zip(weeks, train) if flag}
+    validation_weeks = {week for week, flag in zip(weeks, validation) if flag}
+    holdout_weeks = {week for week, flag in zip(weeks, holdout) if flag}
+
+    assert train_weeks and validation_weeks and holdout_weeks
+    assert not train_weeks & validation_weeks, "a week is in both train and validation"
+    assert not validation_weeks & holdout_weeks, "a week is in both validation and holdout"
+    assert not train_weeks & holdout_weeks, "a week is in both train and holdout"
+    # And they are in time order, which is the whole point.
+    assert max(train_weeks) < min(validation_weeks) < max(validation_weeks) < min(holdout_weeks)
+
+
+def test_a_features_row_cannot_see_the_future(db) -> None:
+    """Built for the same week twice, once with later weeks present and once
+    without, the row must be byte-for-byte identical. If any feature reached
+    forward, adding a future week would change it."""
+    store = _store(db, "grocery", "Sharma Kirana")
+    product = _product(db, store, "LEAK-1")
+    _weekly_sales(db, store, product, weeks=TRAINABLE_WEEKS, qty=5.0)
+    db.commit()
+    context = resolve_store_context(db, store.id)
+
+    histories = stock_forecast_model._histories(db, store.id)
+    history = histories[product.id]
+    rhythm = stock_forecast_model._rhythm(histories)
+    edges = stock_forecast_model._price_bands(histories)
+
+    weeks = sorted(history.weekly)
+    as_of = weeks[len(weeks) // 2]
+    with_future = stock_forecast_model._features_at(history, as_of, edges, rhythm)
+
+    # The same product and store, with every week after `as_of` deleted.
+    truncated = stock_forecast_model.ProductHistory(
+        history.product_id,
+        history.category_id,
+        history.sell_price,
+        history.qty_on_hand,
+        weekly={w: q for w, q in history.weekly.items() if w <= as_of},
+        daily={d: q for d, q in history.daily.items() if stock_forecast_model._week_index(d) <= as_of},
+    )
+    truncated_rhythm = stock_forecast_model.StoreRhythm(
+        weekly_units={w: q for w, q in rhythm.weekly_units.items() if w <= as_of},
+        category_weekly={k: v for k, v in rhythm.category_weekly.items() if k[1] <= as_of},
+    )
+    without_future = stock_forecast_model._features_at(
+        truncated, as_of, edges, truncated_rhythm
+    )
+
+    assert with_future == without_future, (
+        "a feature changed when future weeks were removed, so something reaches forward"
+    )
+
+
+def test_the_calendar_features_describe_the_week_being_predicted(db) -> None:
+    """The one thing read from ahead is which month week w+1 falls in, and a
+    wall calendar supplies that. Asserted rather than assumed."""
+    import math
+
+    store = _store(db, "grocery", "Sharma Kirana")
+    product = _product(db, store, "CAL-1")
+    _weekly_sales(db, store, product, weeks=TRAINABLE_WEEKS, qty=5.0)
+    db.commit()
+
+    histories = stock_forecast_model._histories(db, store.id)
+    history = histories[product.id]
+    rhythm = stock_forecast_model._rhythm(histories)
+    as_of = sorted(history.weekly)[10]
+
+    values = stock_forecast_model._features_at(history, as_of, [0.0, 0.0], rhythm)
+    target_month = stock_forecast_model._week_start(as_of + 1).month
+
+    assert values["target_month_sin"] == pytest.approx(math.sin(2 * math.pi * target_month / 12))
+    assert values["target_month_cos"] == pytest.approx(math.cos(2 * math.pi * target_month / 12))
+
+
+def test_the_run_records_the_full_evaluation_not_just_a_score(db) -> None:
+    store = _store(db, "grocery", "Sharma Kirana")
+    for index in range(3):
+        product = _product(db, store, f"META-{index}")
+        _weekly_sales(db, store, product, weeks=TRAINABLE_WEEKS, qty=4.0 + index)
+    db.commit()
+    context = resolve_store_context(db, store.id)
+
+    metrics = stock_forecast_model.train_store(db, context)
+    db.commit()
+
+    assert metrics["chosen_model"] in stock_forecast_model._candidates()
+    # Chosen on validation, and every candidate's validation score is kept, so
+    # the choice can be re-checked rather than taken on trust.
+    assert set(metrics["validation_mae"]) == set(stock_forecast_model._candidates())
+    assert metrics["chosen_model"] == min(
+        metrics["validation_mae"], key=metrics["validation_mae"].get
+    )
+    for key in ("mae", "rmse", "r2", "baseline_mae", "baseline_rmse", "usable"):
+        assert key in metrics
+    assert metrics["train_rows"] and metrics["validation_rows"] and metrics["holdout_rows"]
+    assert metrics["train_weeks"][1] < metrics["validation_weeks"][0]
+    assert metrics["validation_weeks"][1] < metrics["holdout_weeks"][0]
+    assert metrics["features"] == stock_forecast_model.FEATURES
+
+
+def test_a_prediction_comes_back_for_every_product_with_enough_history(db) -> None:
+    store = _store(db, "grocery", "Sharma Kirana")
+    products = []
+    for index in range(3):
+        product = _product(db, store, f"PRED-{index}")
+        _weekly_sales(db, store, product, weeks=TRAINABLE_WEEKS, qty=4.0 + index)
+        products.append(product)
+    db.commit()
+    context = resolve_store_context(db, store.id)
+
+    stock_forecast_model.train_store(db, context)
+    db.commit()
+
+    predictions = stock_forecast_model.predict_weekly_units(db, context)
+    assert set(predictions) == {product.id for product in products}
+    assert all(value >= 0 for value in predictions.values()), "negative demand is not a thing"
+
+
+def test_an_artefact_from_an_older_feature_set_is_refused_not_guessed(db) -> None:
+    """A saved model whose feature list this version cannot build must send the
+    caller to the moving average rather than be fed a column of guesses."""
+    import joblib
+
+    store = _store(db, "grocery", "Sharma Kirana")
+    product = _product(db, store, "OLDART-1")
+    _weekly_sales(db, store, product, weeks=TRAINABLE_WEEKS, qty=5.0)
+    db.commit()
+    context = resolve_store_context(db, store.id)
+
+    stock_forecast_model.train_store(db, context)
+    db.commit()
+
+    path = stock_forecast_model.model_path(store.id)
+    artefact = joblib.load(path)
+    artefact["features"] = [*artefact["features"], "a_feature_from_a_future_version"]
+    joblib.dump(artefact, path)
+
+    assert stock_forecast_model.predict_weekly_units(db, context) == {}

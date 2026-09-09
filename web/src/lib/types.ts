@@ -366,11 +366,17 @@ export const stockForecastStatus = z.object({
   explanation: z.string(),
   model_name: z.string().nullish(),
   model_version: z.string().nullish(),
+  /** Which estimator won the validation round: ridge, a forest, a booster. */
+  estimator: z.string().nullish(),
   trained_at: z.string().nullish(),
   rows_trained: z.number().nullish(),
   mae: z.number().nullish(),
+  rmse: z.number().nullish(),
   baseline_mae: z.number().nullish(),
   r2: z.number().nullish(),
+  improvement_vs_baseline_pct: z.number().nullish(),
+  holdout_rows: z.number().nullish(),
+  evaluation: z.string().nullish(),
 });
 export type StockForecastStatus = z.infer<typeof stockForecastStatus>;
 
