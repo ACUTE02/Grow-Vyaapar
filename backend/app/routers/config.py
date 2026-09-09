@@ -63,18 +63,34 @@ def update_store_details(
     context: StoreContext = Depends(get_store_context),
     db: Session = Depends(get_db),
 ) -> StoreContextOut:
-    """Store identity - address, WhatsApp number, review link.
+    """Store identity: name, city, language, address, GSTIN, WhatsApp, review link.
 
     Separate from the config endpoint next door because these are columns on
     the store, not vertical thresholds the agent reads. Only what was sent is
-    written, so clearing one field cannot blank the others.
+    written, so a form showing one field cannot blank the others, and the
+    schema forbids unknown keys so no payload can reach a column that is not a
+    setting - store_id and vertical_id among them.
+
+    The store comes from the authorised context, never from the body, so this
+    can only ever edit a store the caller already reached.
     """
     store = db.get(Store, context.store_id)
     if store is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Store not found")
 
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        setattr(store, key, (value or None) if isinstance(value, str) else value)
+    # Name, city and language are NOT NULL in the database, so an explicit null
+    # for one of them is a request to delete something that has to exist. Refuse
+    # it here with a sentence rather than letting the integrity error out.
+    changes = payload.model_dump(exclude_unset=True)
+    required = [key for key in ("name", "city", "language") if key in changes and changes[key] is None]
+    if required:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{', '.join(required)} cannot be cleared - a store always has one.",
+        )
+
+    for key, value in changes.items():
+        setattr(store, key, value)
     db.commit()
 
     return StoreContextOut(**resolve_store_context(db, context.store_id).as_dict())
