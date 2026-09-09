@@ -68,6 +68,21 @@ class ForecastRunOut(BaseModel):
     computed_at: datetime
 
 
+class StockForecastStatusOut(BaseModel):
+    """Is a trained regressor behind the reorder numbers, and if not, why not."""
+
+    trained: bool
+    in_use: bool
+    explanation: str
+    model_name: str | None = None
+    model_version: str | None = None
+    trained_at: datetime | None = None
+    rows_trained: int | None = None
+    mae: float | None = None
+    baseline_mae: float | None = None
+    r2: float | None = None
+
+
 class StockForecastTrainOut(BaseModel):
     store_id: int
     model_name: str

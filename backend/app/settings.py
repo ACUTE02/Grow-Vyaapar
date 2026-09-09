@@ -74,6 +74,23 @@ class Settings(BaseSettings):
     jwt_secret: str
     jwt_expiry_minutes: int = 720
     jwt_cookie_name: str = "localai_token"
+    # The session cookie carries a full token, so it must not travel in clear
+    # text. Set COOKIE_SECURE=false only for a local http experiment; the
+    # Streamlit front end sends the token as a bearer header and does not need
+    # the cookie at all.
+    cookie_secure: bool = True
+
+    # Browsers, not servers: the Streamlit front end calls the API server-side,
+    # so nothing needs "*". Only the origins a browser app is actually served
+    # from belong here.
+    cors_origins: str = (
+        "http://localhost:3000,http://127.0.0.1:3000,"
+        "http://localhost:8501,http://127.0.0.1:8501"
+    )
+
+    @property
+    def allowed_origins(self) -> list[str]:
+        return [origin.strip() for origin in (self.cors_origins or "").split(",") if origin.strip()]
 
     # Scheduler --------------------------------------------------------------
     scheduler_enabled: bool = False
@@ -88,6 +105,14 @@ class Settings(BaseSettings):
     # Observability
     json_logs: bool = False
     log_level: str = "INFO"
+
+    # Machine learning -------------------------------------------------------
+    # Where trained model artefacts (.joblib) live. Empty means backend/models.
+    # It is settable because the test suite must not write into the same
+    # directory the running app reads from: fixture stores reuse the real store
+    # ids, so a test run would otherwise overwrite the deployed model for
+    # store 1 with one trained on fixture data.
+    ml_model_dir: str = ""
 
 
 @lru_cache

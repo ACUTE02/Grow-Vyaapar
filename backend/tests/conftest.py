@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -15,6 +16,11 @@ if str(BACKEND_DIR) not in sys.path:
 
 # Set before app.settings is imported anywhere.
 os.environ["DATABASE_URL"] = "sqlite:///./test_localai.db"
+# Trained artefacts are named by store id, and fixture stores reuse the real
+# ids, so without this a test run overwrites backend/models/*.joblib - the
+# models the running app serves - with ones trained on fixture data. That
+# happened: the deployed store-1 stock forecast became a constant predictor.
+os.environ["ML_MODEL_DIR"] = tempfile.mkdtemp(prefix="localai-test-models-")
 os.environ["DELIVERY_ADAPTER"] = "console"
 os.environ["GROQ_API_KEY"] = ""
 os.environ["GEMINI_API_KEY"] = ""
@@ -99,6 +105,36 @@ def _make_user(db: Session, *, role: str, email: str, store_id: int | None = Non
     db.add(user)
     db.commit()
     return user
+
+
+@pytest.fixture(autouse=True)
+def _no_poster_network(monkeypatch):
+    """The campaign agent composites a poster by downloading the generated
+    background. Tests must not reach that generator - it is slow, it is a
+    third party, and a test that quietly depends on the network is a test that
+    fails on a train. Stubbed to the same thing a real failure produces: the
+    plain background URL, unchanged.
+
+    tests/test_poster.py exercises the real compositing directly, with its own
+    in-memory image.
+    """
+    from app.agents import campaigns
+
+    monkeypatch.setattr(
+        campaigns, "compose_poster", lambda background_url, **kwargs: background_url
+    )
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limits():
+    """The login limiter is process-wide by design, so it has to be cleared
+    between tests - otherwise the suite's own sign-ins trip it and every test
+    after the tenth fails with a 429 that has nothing to do with the test."""
+    from app.ratelimit import login_limiter
+
+    login_limiter.reset()
+    yield
+    login_limiter.reset()
 
 
 @pytest.fixture()

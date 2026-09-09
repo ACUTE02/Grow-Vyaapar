@@ -4,12 +4,13 @@ number."""
 from __future__ import annotations
 
 from datetime import timedelta
+from pathlib import Path
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
 
-from app.agents import forecasting
+from app.agents import churn, forecasting
 from app.ml import stock_forecast_model
 from app.models.base import utcnow
 from app.models.core import Customer, Product, StockLevel, Transaction, TransactionItem
@@ -223,3 +224,98 @@ def test_forecast_stock_endpoint_reports_the_source(client, db) -> None:
     rows = client.get(f"/ml/forecast/stock?store_id={store.id}&view=all").json()
     row = next(r for r in rows if r["sku"] == "API-2")
     assert row["source"] == "model"
+
+
+def test_training_never_writes_into_the_app_model_directory(db) -> None:
+    """A test run must not overwrite the artefacts the running app serves.
+
+    Fixture stores reuse the real store ids, and an artefact is named by store
+    id alone, so before ML_MODEL_DIR existed a `pytest` run replaced
+    backend/models/stock_forecast_1.joblib - the grocery store's real model -
+    with one trained on this file's fixture data, where every product sells
+    exactly 5 a week at 100 rupees. The result was a model that predicted the
+    constant 5.0 for every product, with every feature importance at zero.
+    """
+    app_model_dir = Path(stock_forecast_model.__file__).resolve().parents[2] / "models"
+
+    store = _store(db, "grocery", "Sharma Kirana")
+    product = _product(db, store, "ISO-1")
+    _weekly_sales(db, store, product, weeks=40, qty=5.0)
+    db.commit()
+    context = resolve_store_context(db, store.id)
+
+    stock_forecast_model.train_store(db, context)
+    db.commit()
+
+    written = stock_forecast_model.model_path(store.id)
+    assert written.exists()
+    assert app_model_dir not in written.parents, (
+        f"training wrote {written}, inside the app's own model directory"
+    )
+    # The same isolation has to hold for churn, which names artefacts the same way.
+    assert app_model_dir not in churn.model_path(store.id).parents
+
+
+def test_training_records_how_the_model_compares_with_a_mean_baseline(db) -> None:
+    store = _store(db, "grocery", "Sharma Kirana")
+    for index in range(3):
+        product = _product(db, store, f"BASE-{index}")
+        _weekly_sales(db, store, product, weeks=40, qty=5.0 + index)
+    db.commit()
+    context = resolve_store_context(db, store.id)
+
+    metrics = stock_forecast_model.train_store(db, context)
+    db.commit()
+
+    assert "baseline_mae" in metrics
+    assert isinstance(metrics["beats_baseline"], bool)
+    assert metrics["beats_baseline"] == (metrics["mae"] < metrics["baseline_mae"])
+    assert metrics["usable"] == (metrics["mae"] <= metrics["baseline_mae"] + 1e-9)
+
+
+def test_a_model_that_loses_to_the_baseline_is_not_served(db) -> None:
+    """The forecast then falls back to the moving average for every product,
+    which is the honest outcome: a model no better than predicting the mean
+    must not decide how much stock a shop buys."""
+    store = _store(db, "grocery", "Sharma Kirana")
+    product = _product(db, store, "GATE-1")
+    _weekly_sales(db, store, product, weeks=40, qty=5.0)
+    db.commit()
+    context = resolve_store_context(db, store.id)
+
+    stock_forecast_model.train_store(db, context)
+    db.commit()
+
+    run = stock_forecast_model.latest_run(db, store.id)
+    assert run is not None
+    run.metrics = {**(run.metrics or {}), "usable": False}
+    db.commit()
+
+    assert stock_forecast_model.predict_weekly_units(db, context) == {}
+
+    rows = forecasting.compute(db, context)
+    assert rows, "the moving-average fallback must still produce a forecast"
+    assert all(row.source == "estimate" for row in rows)
+
+
+def test_status_endpoint_explains_why_the_model_is_not_used(client, db) -> None:
+    store = _store(db, "grocery", "Sharma Kirana")
+    product = _product(db, store, "STAT-1")
+    _weekly_sales(db, store, product, weeks=40, qty=5.0)
+    db.commit()
+
+    before = client.get(f"/ml/stock_forecast/status?store_id={store.id}")
+    assert before.status_code == 200
+    assert before.json()["trained"] is False
+    assert before.json()["in_use"] is False
+
+    client.post(f"/ml/stock_forecast/train?store_id={store.id}")
+
+    run = stock_forecast_model.latest_run(db, store.id)
+    run.metrics = {**(run.metrics or {}), "usable": False, "mae": 9.0, "baseline_mae": 4.0}
+    db.commit()
+
+    after = client.get(f"/ml/stock_forecast/status?store_id={store.id}").json()
+    assert after["trained"] is True
+    assert after["in_use"] is False
+    assert "worse than simply predicting the mean" in after["explanation"]

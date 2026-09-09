@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 from app.models.core import Product, StockLevel, Transaction, TransactionItem
 from app.models.ml import ModelRun
 from app.services.errors import ValidationError
+from app.settings import settings
 from app.verticals.context import StoreContext
 
 logger = logging.getLogger(__name__)
@@ -43,13 +44,19 @@ logger = logging.getLogger(__name__)
 MODEL_NAME = "stock_forecast"
 MODEL_VERSION = "1.0.0"
 RANDOM_STATE = 42
-MODEL_DIR = Path(__file__).resolve().parents[2] / "models"
+MODEL_DIR = (
+    Path(settings.ml_model_dir)
+    if settings.ml_model_dir
+    else Path(__file__).resolve().parents[2] / "models"
+)
 EPOCH = date(2020, 1, 1)
 
 # Fewer weeks of history than this for a given product and its prediction is
 # not trusted - the caller falls back to the moving average for that product.
 MIN_WEEKS_HISTORY = 8
 MIN_TRAINING_ROWS = 30
+# Leaves must be broad enough to average over noise rather than memorise it.
+MIN_SAMPLES_LEAF = 50
 MAX_TRAINING_WEEKS_BACK = 260  # cap the walk-forward window at ~5 years
 
 _DOW_FEATURES = [
@@ -249,7 +256,20 @@ def train_store(db: Session, context: StoreContext) -> dict[str, Any]:
         features, labels, test_size=0.2, random_state=RANDOM_STATE
     )
 
-    model = RandomForestRegressor(n_estimators=200, random_state=RANDOM_STATE, n_jobs=1)
+    # min_samples_leaf is the whole difference between a model that helps and
+    # one that hurts. Unconstrained, the forest grows a leaf per training row,
+    # memorises the noise in weekly counts, and scores WORSE than predicting
+    # the mean (R^2 -0.05 to -0.10 across the three seeded stores) - while the
+    # artefact grows to ~95 MB per store because every leaf is stored. Requiring
+    # 50 rows per leaf takes R^2 to roughly zero, and the file to a few MB.
+    # It does not make the model good: see the model card, the demand signal in
+    # the seed data is close to noise. It makes it honest and cheap.
+    model = RandomForestRegressor(
+        n_estimators=200,
+        min_samples_leaf=MIN_SAMPLES_LEAF,
+        random_state=RANDOM_STATE,
+        n_jobs=1,
+    )
     model.fit(x_train, y_train)
 
     predictions = model.predict(x_test)
@@ -260,9 +280,28 @@ def train_store(db: Session, context: StoreContext) -> dict[str, Any]:
         for name, value in zip(FEATURES, model.feature_importances_)
     }
 
+    # What a model with no features at all would score on the same holdout:
+    # predict the training mean, every time. A regressor that cannot beat this
+    # has learned nothing, and saying so in the metrics is the only way the
+    # serving path can refuse to use it (see `usable_run`). On the synthetic
+    # seed data it does not beat it - that is recorded, not tuned away.
+    baseline = [float(sum(y_train) / len(y_train))] * len(y_test)
+    baseline_mae = mean_absolute_error(y_test, baseline)
+    # Two verdicts, because they answer different questions. `beats_baseline`
+    # is for the report - did the features buy us anything? `usable` is for the
+    # serving gate, and only asks the weaker question: is this model at least
+    # not worse? A tie (flat demand, where both predict the same number) is
+    # not a reason to switch the model off; losing is.
+    beats_baseline = bool(mae < baseline_mae)
+    usable = bool(mae <= baseline_mae + 1e-9)
+
     metrics = {
         "r2": round(float(r2), 4),
         "mae": round(float(mae), 4),
+        "baseline_mae": round(float(baseline_mae), 4),
+        "baseline_description": "predict the training mean for every product and week",
+        "beats_baseline": beats_baseline,
+        "usable": usable,
         "feature_importances": importances,
         "train_rows": len(x_train),
         "test_rows": len(x_test),
@@ -295,6 +334,7 @@ def train_store(db: Session, context: StoreContext) -> dict[str, Any]:
             params={
                 "estimator": "RandomForestRegressor",
                 "n_estimators": 200,
+                "min_samples_leaf": MIN_SAMPLES_LEAF,
                 "random_state": RANDOM_STATE,
                 "test_size": 0.2,
                 "features": FEATURES,
@@ -327,6 +367,13 @@ def predict_weekly_units(db: Session, context: StoreContext) -> dict[int, float]
     if not path.exists():
         return {}
 
+    # A model that lost to "predict the mean" on its own holdout must not drive
+    # a shopkeeper's reorder quantities. Refusing here rather than in the UI
+    # means the caller's moving-average fallback takes over for every product,
+    # and the forecast row honestly reads "estimate" instead of "model".
+    if not model_is_usable(db, context.store_id):
+        return {}
+
     try:
         artefact = joblib.load(path)
     except Exception:
@@ -357,6 +404,23 @@ def predict_weekly_units(db: Session, context: StoreContext) -> dict[int, float]
         product_id: max(float(prediction), 0.0)
         for product_id, prediction in zip(confident_ids, predictions)
     }
+
+
+def model_is_usable(db: Session, store_id: int) -> bool:
+    """Did the last training run beat the no-feature baseline?
+
+    "Usable" is the weak test - no worse than predicting the mean - not the
+    strong one. A model that ties the baseline still gets served; one that
+    loses to it does not.
+
+    A missing verdict means the run predates this comparison; those are treated
+    as usable so an older artefact is not silently switched off. The next
+    training run records a verdict either way.
+    """
+    run = latest_run(db, store_id)
+    if run is None:
+        return False
+    return bool((run.metrics or {}).get("usable", True))
 
 
 def latest_run(db: Session, store_id: int) -> ModelRun | None:

@@ -27,6 +27,7 @@ from app.models.base import utcnow
 from app.models.core import Customer, Product, Transaction, TransactionItem
 from app.models.ml import ModelRun
 from app.services.errors import ValidationError
+from app.settings import settings
 from app.verticals.context import StoreContext
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,11 @@ logger = logging.getLogger(__name__)
 MODEL_NAME = "churn-logreg"
 MODEL_VERSION = "1.0.0"
 RANDOM_STATE = 42
-MODEL_DIR = Path(__file__).resolve().parents[2] / "models"
+MODEL_DIR = (
+    Path(settings.ml_model_dir)
+    if settings.ml_model_dir
+    else Path(__file__).resolve().parents[2] / "models"
+)
 
 FEATURES = [
     "recency_days",

@@ -19,6 +19,7 @@ from app.schemas.ml import (
     ModelRunOut,
     QueueWinbackOut,
     StockForecastOut,
+    StockForecastStatusOut,
     StockForecastTrainOut,
 )
 from app.services.errors import NotFoundError
@@ -225,6 +226,61 @@ def forecast_run(
     result = forecast_agent.run(db, context)
     db.commit()
     return result
+
+
+@router.get("/stock_forecast/status", response_model=StockForecastStatusOut)
+def stock_forecast_status(
+    context: StoreContext = Depends(get_store_context_from_query),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Whether a trained regressor is actually driving the reorder numbers.
+
+    The forecast table's per-row badge says "SQL estimate" for two different
+    reasons - no model has been trained, or one has and it lost to a no-feature
+    baseline so it is deliberately not served. Those deserve different words on
+    screen, and only this endpoint can tell them apart.
+    """
+    from app.ml import stock_forecast_model  # noqa: PLC0415
+
+    run = stock_forecast_model.latest_run(db, context.store_id)
+    if run is None:
+        return {
+            "trained": False,
+            "in_use": False,
+            "explanation": (
+                f"No stock forecast model has been trained for {context.store_name}. "
+                "Every row comes from the moving-average estimate."
+            ),
+        }
+
+    metrics = run.metrics or {}
+    in_use = stock_forecast_model.model_is_usable(db, context.store_id)
+    if in_use:
+        explanation = (
+            f"Trained on {run.rows_trained} product-weeks. MAE {metrics.get('mae')} against "
+            f"{metrics.get('baseline_mae')} for predicting the mean, so it is used for products "
+            f"with at least {stock_forecast_model.MIN_WEEKS_HISTORY} weeks of their own history."
+        )
+    else:
+        explanation = (
+            f"A model was trained on {run.rows_trained} product-weeks but is not used: its "
+            f"error (MAE {metrics.get('mae')}) is worse than simply predicting the mean "
+            f"(MAE {metrics.get('baseline_mae')}), so it would make the reorder numbers less "
+            "accurate rather than more. Every row falls back to the moving-average estimate."
+        )
+
+    return {
+        "trained": True,
+        "in_use": in_use,
+        "model_name": run.model_name,
+        "model_version": run.model_version,
+        "trained_at": run.trained_at,
+        "rows_trained": run.rows_trained,
+        "mae": metrics.get("mae"),
+        "baseline_mae": metrics.get("baseline_mae"),
+        "r2": metrics.get("r2"),
+        "explanation": explanation,
+    }
 
 
 @router.post("/stock_forecast/train", response_model=StockForecastTrainOut)
