@@ -54,9 +54,17 @@ def create_category(
     return category
 
 
-def _auditable(product: Product) -> dict[str, Any]:
-    """The fields worth keeping a history of."""
-    return {
+def _auditable(product: Product, stock: StockLevel | None = None) -> dict[str, Any]:
+    """The fields worth keeping a history of.
+
+    Stock is in here because editing a product is the one place a count can be
+    corrected by hand. Everything else that moves stock - a bill, a refund, a
+    received order - is traceable to the event that caused it; this is not, so
+    without an audit row a shelf could change by a hundred units with nothing
+    recording who did it. The Inventory page tells a shopkeeper every movement
+    is traceable, and that has to be true.
+    """
+    fields = {
         "sku": product.sku,
         "name": product.name,
         "sell_price": str(product.sell_price),
@@ -65,6 +73,17 @@ def _auditable(product: Product) -> dict[str, Any]:
         "is_active": product.is_active,
         "category_id": product.category_id,
     }
+    if stock is not None:
+        # Quantised to the column's own scale, so the before and after of one
+        # correction read as "100.000" and "40.000" rather than "100.000" and
+        # "40" - the second of which looks like a different kind of number.
+        fields["qty_on_hand"] = _qty(stock.qty_on_hand)
+        fields["reorder_point"] = _qty(stock.reorder_point)
+    return fields
+
+
+def _qty(value: Any) -> str:
+    return str(Decimal(str(value)).quantize(Decimal("0.001")))
 
 
 # -- products ---------------------------------------------------------------
@@ -201,7 +220,8 @@ def update_product(
     db: Session, context: StoreContext, product_id: int, payload: dict[str, Any]
 ) -> dict[str, Any]:
     product = get_product(db, context, product_id)
-    before = _auditable(product)
+    stock = db.scalar(select(StockLevel).where(StockLevel.product_id == product.id))
+    before = _auditable(product, stock)
     data = {key: value for key, value in payload.items() if value is not None}
     qty_on_hand = data.pop("qty_on_hand", None)
     reorder_point = data.pop("reorder_point", None)
@@ -219,7 +239,6 @@ def update_product(
         setattr(product, key, value)
 
     if qty_on_hand is not None or reorder_point is not None:
-        stock = db.scalar(select(StockLevel).where(StockLevel.product_id == product.id))
         if stock is None:
             stock = StockLevel(product_id=product.id)
             db.add(stock)
@@ -230,7 +249,7 @@ def update_product(
 
     db.flush()
 
-    changed_before, changed_after = audit.diff(before, _auditable(product))
+    changed_before, changed_after = audit.diff(before, _auditable(product, stock))
     if changed_after:
         audit.record(
             db,
