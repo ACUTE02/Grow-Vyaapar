@@ -209,6 +209,39 @@ export function useLowStock(storeId: number) {
   });
 }
 
+/**
+ * Correct a count on purpose.
+ *
+ * Invalidates the whole store afterwards: a corrected shelf changes the low
+ * stock list, the dead stock list, the dashboard tiles and the reorder
+ * forecast, and enumerating those is how one of them gets forgotten.
+ */
+export function useAdjustStock(storeId: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: {
+      productId: number;
+      quantity_delta: string;
+      reason: string;
+      note?: string | null;
+    }) =>
+      T.stockAdjustment.parse(
+        await apiPost<unknown>(
+          `/products/${params.productId}/adjustments`,
+          { store_id: storeId },
+          {
+            quantity_delta: params.quantity_delta,
+            reason: params.reason,
+            note: params.note || null,
+          },
+        ),
+      ),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ["store", storeId] });
+    },
+  });
+}
+
 export function useDeadStock(storeId: number) {
   return useQuery({
     queryKey: keys.deadStock(storeId),

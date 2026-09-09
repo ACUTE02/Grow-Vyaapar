@@ -492,3 +492,30 @@ export const auditEntry = z.object({
   created_at: z.string(),
 });
 export type AuditEntry = z.infer<typeof auditEntry>;
+
+
+/** Why a count was corrected. Mirrors the API's controlled list. */
+export const ADJUSTMENT_REASONS = [
+  { value: "stock_count", label: "Stock count correction" },
+  { value: "damaged", label: "Damaged" },
+  { value: "expired", label: "Expired" },
+  { value: "lost", label: "Lost" },
+  { value: "found", label: "Found" },
+  { value: "manual_correction", label: "Manual correction" },
+  { value: "other", label: "Other" },
+] as const;
+
+export const stockAdjustment = z.object({
+  product_id: z.number(),
+  sku: z.string(),
+  name: z.string(),
+  unit_label: z.string(),
+  qty_before: z.coerce.number(),
+  quantity_delta: z.coerce.number(),
+  qty_after: z.coerce.number(),
+  reason: z.string(),
+  note: z.string().nullish(),
+  adjusted_at: z.string(),
+  adjusted_by: z.number().nullish(),
+});
+export type StockAdjustment = z.infer<typeof stockAdjustment>;

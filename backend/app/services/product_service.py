@@ -263,3 +263,131 @@ def update_product(
         db.flush()
 
     return get_product_out(db, context, product.id)
+
+
+# -- stock adjustments -------------------------------------------------------
+ADJUSTMENT_ACTION = "stock.adjust"
+
+
+def adjust_stock(
+    db: Session,
+    context: StoreContext,
+    product_id: int,
+    *,
+    quantity_delta: Decimal,
+    reason: str,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """Move one product's count on purpose, and write down why.
+
+    Every other movement in this system is a side effect of something else - a
+    bill, a refund, a received order - and traces back to that event. This one
+    has no event behind it, so the audit row IS the event: without it a shelf
+    could go from a hundred to forty with nothing recording who decided that.
+
+    Deliberately not a setter. A shopkeeper counting a shelf knows "six fewer
+    than the screen says" far more reliably than they know the true total, and
+    a delta cannot silently discard a sale that landed between reading the
+    screen and pressing the button.
+
+    Raises ValidationError for a no-op or an adjustment that would take the
+    shelf below zero, NotFoundError for a product belonging to somebody else.
+    The caller commits; any exception leaves nothing written.
+    """
+    product = get_product(db, context, product_id)
+
+    delta = Decimal(str(quantity_delta))
+    if delta == 0:
+        raise ValidationError(
+            "An adjustment of zero changes nothing. Enter how many units to add or remove."
+        )
+
+    stock = db.scalar(select(StockLevel).where(StockLevel.product_id == product.id))
+    if stock is None:
+        stock = StockLevel(
+            product_id=product.id, qty_on_hand=Decimal("0"), reorder_point=Decimal("0")
+        )
+        db.add(stock)
+        db.flush()
+
+    before = Decimal(str(stock.qty_on_hand))
+    after = before + delta
+    if after < 0:
+        raise ValidationError(
+            f"{product.sku} has {before.normalize()} {context.unit_label} in stock; "
+            f"removing {abs(delta).normalize()} would leave {after.normalize()}. "
+            "Stock cannot go below zero."
+        )
+
+    stock.qty_on_hand = after
+    db.flush()
+
+    entry = audit.record(
+        db,
+        action=ADJUSTMENT_ACTION,
+        entity="product",
+        entity_id=product.id,
+        store_id=context.store_id,
+        before={"qty_on_hand": str(before)},
+        after={
+            "qty_on_hand": str(after),
+            "quantity_delta": str(delta),
+            "reason": reason,
+            "note": note or None,
+        },
+    )
+
+    return {
+        "product_id": product.id,
+        "sku": product.sku,
+        "name": product.name,
+        "unit_label": context.unit_label,
+        "qty_before": before,
+        "quantity_delta": delta,
+        "qty_after": after,
+        "reason": reason,
+        "note": note or None,
+        "adjusted_at": entry.created_at,
+        "adjusted_by": entry.user_id,
+    }
+
+
+def list_adjustments(
+    db: Session, context: StoreContext, product_id: int, limit: int = 50
+) -> list[dict[str, Any]]:
+    """This product's adjustment history, newest first, read back out of the
+    audit trail rather than from a second table keeping the same facts."""
+    from app.models.admin import AuditLog  # noqa: PLC0415
+
+    product = get_product(db, context, product_id)
+    rows = db.scalars(
+        select(AuditLog)
+        .where(
+            AuditLog.store_id == context.store_id,
+            AuditLog.entity == "product",
+            AuditLog.entity_id == str(product.id),
+            AuditLog.action == ADJUSTMENT_ACTION,
+        )
+        .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+        .limit(limit)
+    ).all()
+
+    history = []
+    for row in rows:
+        after = row.after or {}
+        history.append(
+            {
+                "product_id": product.id,
+                "sku": product.sku,
+                "name": product.name,
+                "unit_label": context.unit_label,
+                "qty_before": Decimal(str((row.before or {}).get("qty_on_hand", "0"))),
+                "quantity_delta": Decimal(str(after.get("quantity_delta", "0"))),
+                "qty_after": Decimal(str(after.get("qty_on_hand", "0"))),
+                "reason": after.get("reason", "other"),
+                "note": after.get("note"),
+                "adjusted_at": row.created_at,
+                "adjusted_by": row.user_id,
+            }
+        )
+    return history

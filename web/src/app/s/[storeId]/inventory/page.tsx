@@ -7,10 +7,16 @@ import { PageHeader, StatTile } from "@/components/ui/page-header";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState, ErrorState, Notice, SkeletonRows } from "@/components/ui/states";
 import { Table, TBody, TD, TH, THead, TR, TRowHeader } from "@/components/ui/table";
-import { useDeadStock, useLowStock } from "@/lib/queries";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
+import { AdjustStockDialog } from "@/components/inventory/adjust-stock-dialog";
+import { useAdjustStock, useDeadStock, useLowStock } from "@/lib/queries";
+import { canManage, useSession } from "@/lib/session";
 import { useActiveStore } from "@/lib/active-store";
 import { money, quantity, count, relativeDays } from "@/lib/format";
+import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import type { StockRow } from "@/lib/types";
 
 type Tab = "low" | "dead";
 
@@ -30,6 +36,12 @@ export default function InventoryPage({ params }: { params: Promise<{ storeId: s
 
   const low = useLowStock(storeId);
   const dead = useDeadStock(storeId);
+
+  const session = useSession();
+  const manager = canManage(session.user);
+  const toast = useToast();
+  const adjust = useAdjustStock(storeId);
+  const [adjusting, setAdjusting] = useState<StockRow | null>(null);
 
   const deadStockDays = store.config.dead_stock_days;
   const reorderCycle = store.config.reorder_cycle_days;
@@ -133,6 +145,7 @@ export default function InventoryPage({ params }: { params: Promise<{ storeId: s
               {tab === "dead" ? <TH>Last sold</TH> : null}
               <TH align="right">Retail value</TH>
               <TH>Status</TH>
+              {manager ? <TH>Adjust</TH> : null}
             </THead>
             <TBody>
               {rows.map((row) => (
@@ -164,6 +177,20 @@ export default function InventoryPage({ params }: { params: Promise<{ storeId: s
                       <Badge tone="neutral">Not selling</Badge>
                     )}
                   </TD>
+                  {manager ? (
+                    <TD>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => {
+                          adjust.reset();
+                          setAdjusting(row);
+                        }}
+                      >
+                        Adjust stock
+                      </Button>
+                    </TD>
+                  ) : null}
                 </TR>
               ))}
             </TBody>
@@ -172,10 +199,37 @@ export default function InventoryPage({ params }: { params: Promise<{ storeId: s
       </Card>
 
       <Notice tone="info">
-        Stock moves when a bill is completed or refunded, and when a purchase order is received.
-        There is no free-hand stock edit here on purpose — every movement stays traceable to the
-        event that caused it. Correct a quantity on the Products page if a count was wrong.
+        Stock moves on its own when a bill is completed or refunded and when a purchase order is
+        received, so those movements trace back to the event that caused them. Adjust stock is for
+        the ones that do not have an event: breakage, a miscount, something found at the back of a
+        shelf. It asks for a reason and records who made it, so a shelf can never change with
+        nothing saying why.
       </Notice>
+
+      <AdjustStockDialog
+        open={adjusting !== null}
+        product={adjusting}
+        busy={adjust.isPending}
+        serverError={adjust.error instanceof ApiError ? adjust.error.message : null}
+        onClose={() => {
+          adjust.reset();
+          setAdjusting(null);
+        }}
+        onSubmit={(values) => {
+          if (adjusting === null) return;
+          adjust.mutate(
+            { productId: adjusting.product_id, ...values },
+            {
+              onSuccess: (result) => {
+                setAdjusting(null);
+                toast.success(
+                  `${result.sku} adjusted to ${quantity(result.qty_after, result.unit_label)}.`,
+                );
+              },
+            },
+          );
+        }}
+      />
     </>
   );
 }

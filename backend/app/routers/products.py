@@ -13,6 +13,8 @@ from sqlalchemy import select
 
 from app.models.core import Batch, Product, ProductCategory
 from app.schemas.products import (
+    StockAdjustmentIn,
+    StockAdjustmentOut,
     CategoryIn,
     CategoryOut,
     ProductIn,
@@ -156,3 +158,54 @@ def update_product(
     )
     db.commit()
     return product
+
+
+@router.post(
+    "/{product_id}/adjustments",
+    response_model=StockAdjustmentOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Adjust a product's stock on purpose",
+    description=(
+        "Corrects a count and records why. Every other stock movement in this "
+        "system is a side effect of a bill, a refund or a received order and "
+        "traces back to it; an adjustment has no such event behind it, so the "
+        "audit row is the event.\n\n"
+        "`quantity_delta` is signed: positive found stock, negative lost it. "
+        "Zero is refused, and so is any adjustment that would take the shelf "
+        "below zero. The product must belong to the store in the authorised "
+        "context - neither the product's store nor the actor is taken from the "
+        "request body."
+    ),
+)
+def adjust_stock(
+    product_id: int,
+    payload: StockAdjustmentIn,
+    context: StoreContext = Depends(get_store_context_from_query),
+    db: Session = Depends(get_db),
+) -> dict:
+    """The count moves and the audit row is written together, or neither is."""
+    try:
+        adjustment = product_service.adjust_stock(
+            db,
+            context,
+            product_id,
+            quantity_delta=payload.quantity_delta,
+            reason=payload.reason,
+            note=payload.note,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return adjustment
+
+
+@router.get("/{product_id}/adjustments", response_model=list[StockAdjustmentOut])
+def list_stock_adjustments(
+    product_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    context: StoreContext = Depends(get_store_context_from_query),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """What has been corrected on this product, newest first."""
+    return product_service.list_adjustments(db, context, product_id, limit=limit)
