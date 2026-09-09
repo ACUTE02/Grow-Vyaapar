@@ -97,7 +97,13 @@ async function toError(response: Response) {
 async function request<T>(
   method: string,
   path: string,
-  options: { query?: Query; body?: unknown; signal?: AbortSignal } = {},
+  options: {
+    query?: Query;
+    body?: unknown;
+    signal?: AbortSignal;
+    /** Extra request headers. Used for Idempotency-Key on checkout. */
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<{ data: T; headers: Headers }> {
   const token = readToken();
   const response = await fetch(buildUrl(path, options.query), {
@@ -106,6 +112,7 @@ async function request<T>(
     headers: {
       ...(options.body === undefined ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
     },
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
@@ -125,8 +132,13 @@ export async function apiGet<T>(path: string, query?: Query, signal?: AbortSigna
   return data;
 }
 
-export async function apiPost<T>(path: string, query?: Query, body?: unknown) {
-  const { data } = await request<T>("POST", path, { query, body });
+export async function apiPost<T>(
+  path: string,
+  query?: Query,
+  body?: unknown,
+  headers?: Record<string, string>,
+) {
+  const { data } = await request<T>("POST", path, { query, body, headers });
   return data;
 }
 

@@ -6,6 +6,8 @@ person.
 """
 from __future__ import annotations
 
+import uuid
+
 from datetime import timedelta
 from decimal import Decimal
 
@@ -24,6 +26,12 @@ from app.services import delivery_service
 from app.settings import settings
 from app.verticals.context import resolve_store_context
 from tests.test_segmentation import _catalog, _history, _store
+
+
+def _idempotency_key() -> dict[str, str]:
+    """A fresh Idempotency-Key per checkout, which the sale endpoint requires."""
+    return {"Idempotency-Key": uuid.uuid4().hex}
+
 
 
 @pytest.fixture()
@@ -75,6 +83,7 @@ def test_the_post_sale_hook_respects_consent(client, rules) -> None:
     response = client.post(
         f"/billing/transactions?store_id={store.id}",
         json={"customer_id": customer.id, "lines": [{"product_id": product.id, "qty": 1}]},
+        headers=_idempotency_key(),
     )
     assert response.status_code == 201
 

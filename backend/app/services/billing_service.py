@@ -144,11 +144,18 @@ def create_sale(
     status: str = "completed",
     coupon_code: str | None = None,
     redeem_points: int = 0,
+    idempotency_key: str | None = None,
 ) -> Transaction:
     """Validate stock, write the transaction and decrement stock in one DB transaction.
 
     Raises ConflictError on an oversell, NotFoundError for unknown ids. The caller
     commits; any exception leaves the session rolled back by the router.
+
+    `idempotency_key` is stored, not checked, on purpose. Looking it up here
+    and returning early would leave a window between the check and the insert;
+    the unique constraint on (store_id, idempotency_key) closes that window,
+    and the router is where the resulting IntegrityError is turned back into
+    the original bill.
     """
     if customer_id is not None:
         customer = db.get(Customer, customer_id)
@@ -225,6 +232,12 @@ def create_sale(
         payment_mode=payment_mode,
         status=status,
         created_at=stamp,
+        # Written inside the same DB transaction as the bill and the stock
+        # movement, which is what lets the unique constraint decide the race:
+        # a duplicate that gets this far fails the INSERT rather than landing a
+        # second bill. None for callers with no HTTP request behind them, such
+        # as the seed.
+        idempotency_key=idempotency_key,
     )
     db.add(transaction)
     db.flush()

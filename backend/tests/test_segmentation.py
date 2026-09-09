@@ -1,6 +1,8 @@
 """Segmentation and the reminder engine, driven only by thresholds and rules."""
 from __future__ import annotations
 
+import uuid
+
 from datetime import timedelta
 from decimal import Decimal
 
@@ -20,6 +22,12 @@ from app.models.core import (
     TransactionItem,
 )
 from app.verticals.context import resolve_store_context
+
+
+def _idempotency_key() -> dict[str, str]:
+    """A fresh Idempotency-Key per checkout, which the sale endpoint requires."""
+    return {"Idempotency-Key": uuid.uuid4().hex}
+
 
 
 # -- the classifier ----------------------------------------------------------
@@ -251,6 +259,7 @@ def test_completing_a_sale_creates_a_review_request_with_no_manual_action(
     response = client.post(
         f"/billing/transactions?store_id={store.id}",
         json={"customer_id": customer.id, "lines": [{"product_id": product.id, "qty": 1}]},
+        headers=_idempotency_key(),
     )
     assert response.status_code == 201, response.text
 

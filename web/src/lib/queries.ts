@@ -242,11 +242,29 @@ export function useTransactions(
   });
 }
 
+/**
+ * Complete a sale.
+ *
+ * The caller passes the key alongside the body, because the key belongs to the
+ * checkout rather than to the request: every retry of one cart has to carry
+ * the same one, or the retry becomes a second bill. The server treats a
+ * repeat as a replay and returns the original.
+ */
 export function useCreateSale(storeId: number) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: async (body: Record<string, unknown>) =>
-      T.transaction.parse(await apiPost<unknown>("/billing/transactions", { store_id: storeId }, body)),
+    mutationFn: async ({
+      body,
+      idempotencyKey,
+    }: {
+      body: Record<string, unknown>;
+      idempotencyKey: string;
+    }) =>
+      T.transaction.parse(
+        await apiPost<unknown>("/billing/transactions", { store_id: storeId }, body, {
+          "Idempotency-Key": idempotencyKey,
+        }),
+      ),
     onSuccess: () => {
       // A sale moves stock, the customer's history, the day's totals and the
       // agent's queue. Invalidate the whole store rather than enumerate them.

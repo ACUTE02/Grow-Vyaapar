@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Response, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -62,13 +63,62 @@ def _serialise(db: Session, context: StoreContext, transaction: Transaction) -> 
     }
 
 
-@router.post("/transactions", response_model=TransactionOut, status_code=status.HTTP_201_CREATED)
+def _replay(db: Session, store_id: int, key: str) -> Transaction | None:
+    """The bill this key already produced at this store, if it produced one.
+
+    Scoped by the store from the authorised context, never by anything the
+    caller sent, so a key guessed from another shop finds nothing here.
+    """
+    return db.scalar(
+        select(Transaction).where(
+            Transaction.store_id == store_id, Transaction.idempotency_key == key
+        )
+    )
+
+
+@router.post(
+    "/transactions",
+    response_model=TransactionOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Complete a sale",
+    description=(
+        "Writes the bill, its lines and the stock movement in one database "
+        "transaction: all of it happens or none of it does.\n\n"
+        "**`Idempotency-Key` is required.** The client generates one key per "
+        "logical checkout - a fresh UUID when the cart is submitted, reused "
+        "unchanged for every retry of that same submission. Sending the same "
+        "key again returns the original bill instead of writing a second one, "
+        "so a timeout, a dropped connection or a double submit costs the shop "
+        "nothing. The response carries `Idempotency-Replayed: true` when that "
+        "happens.\n\n"
+        "Keys are scoped per store: two shops may use the same key without "
+        "colliding, and a key cannot be used to read another store's bill. "
+        "A request that fails - an oversell, say - writes nothing and leaves "
+        "the key free to use again."
+    ),
+)
 def create_transaction(
     payload: SaleIn,
+    response: Response,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=64,
+        description="One client-generated key per checkout. Retries reuse it.",
+    ),
     context: StoreContext = Depends(get_store_context_from_query),
     db: Session = Depends(get_db),
 ) -> dict:
     """One DB transaction: items written and stock decremented, or nothing at all."""
+    # The cheap path: this key already has a bill, so hand back that bill and
+    # touch nothing. Indexed by the unique constraint, so it is one lookup.
+    existing = _replay(db, context.store_id, idempotency_key)
+    if existing is not None:
+        response.status_code = status.HTTP_200_OK
+        response.headers["Idempotency-Replayed"] = "true"
+        return _serialise(db, context, existing)
+
     try:
         transaction = billing_service.create_sale(
             db,
@@ -79,8 +129,23 @@ def create_transaction(
             payment_mode=payload.payment_mode,
             coupon_code=payload.coupon_code,
             redeem_points=payload.redeem_points,
+            idempotency_key=idempotency_key,
         )
         db.commit()
+    except IntegrityError:
+        # Two requests carrying one key raced past the lookup above and both
+        # tried to insert. The unique constraint let exactly one through, and
+        # this is the other one: return what the winner wrote.
+        db.rollback()
+        winner = _replay(db, context.store_id, idempotency_key)
+        if winner is None:
+            # Some other constraint failed - a clashing invoice number, most
+            # likely. That is not an idempotency replay and must not be
+            # dressed up as one.
+            raise
+        response.status_code = status.HTTP_200_OK
+        response.headers["Idempotency-Replayed"] = "true"
+        return _serialise(db, context, winner)
     except Exception:
         db.rollback()
         raise
@@ -89,6 +154,8 @@ def create_transaction(
     from app.agents import reminders as reminder_agent  # noqa: PLC0415
 
     # The agent is not asked; a completed sale is a signal it listens for.
+    # Only for a sale that actually happened: a replay above returns before
+    # this line, so a retried checkout cannot queue a second reminder.
     reminder_agent.on_transaction_completed(db, context, transaction.id)
     return _serialise(db, context, transaction)
 

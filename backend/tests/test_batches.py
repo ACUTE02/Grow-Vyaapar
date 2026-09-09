@@ -1,6 +1,8 @@
 """Batches and expiry: FEFO picking, alert windows, and the flag that gates both."""
 from __future__ import annotations
 
+import uuid
+
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -10,6 +12,12 @@ from app.models.core import Batch, Product, StockLevel, TransactionItem
 from app.services import batch_service
 from app.verticals.context import resolve_store_context
 from tests.test_segmentation import _store
+
+
+def _idempotency_key() -> dict[str, str]:
+    """A fresh Idempotency-Key per checkout, which the sale endpoint requires."""
+    return {"Idempotency-Key": uuid.uuid4().hex}
+
 
 
 def _product(db, store, sku: str = "MED-1", qty: str = "50") -> Product:
@@ -57,6 +65,7 @@ def test_fefo_takes_the_earliest_expiry_first_and_spills_into_the_next(client, d
     response = client.post(
         f"/billing/transactions?store_id={store.id}",
         json={"lines": [{"product_id": product.id, "qty": 3}]},
+        headers=_idempotency_key(),
     )
     assert response.status_code == 201, response.text
 
@@ -103,6 +112,7 @@ def test_a_refund_puts_the_stock_back_in_its_batches(client, db) -> None:
     sale = client.post(
         f"/billing/transactions?store_id={store.id}",
         json={"lines": [{"product_id": product.id, "qty": 3}]},
+        headers=_idempotency_key(),
     ).json()
     refunded = client.post(f"/billing/transactions/{sale['id']}/refund?store_id={store.id}")
     assert refunded.status_code == 200
@@ -121,6 +131,7 @@ def test_a_vertical_without_the_expiry_flag_records_no_allocation(client, db) ->
     client.post(
         f"/billing/transactions?store_id={store.id}",
         json={"lines": [{"product_id": product.id, "qty": 2}]},
+        headers=_idempotency_key(),
     )
     db.expire_all()
     item = db.scalar(select(TransactionItem))

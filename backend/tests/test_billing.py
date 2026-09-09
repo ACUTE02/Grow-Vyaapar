@@ -1,6 +1,8 @@
 """Billing: stock moves exactly, oversells change nothing, GST adds up."""
 from __future__ import annotations
 
+import uuid
+
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -8,6 +10,12 @@ from sqlalchemy import select
 from app.models.config import Store, Vertical
 from app.models.core import Product, StockLevel, Transaction
 from app.services.billing_service import LineInput, compute_totals
+
+
+def _idempotency_key() -> dict[str, str]:
+    """A fresh Idempotency-Key per checkout, which the sale endpoint requires."""
+    return {"Idempotency-Key": uuid.uuid4().hex}
+
 
 
 def _store_for(db, code: str, name: str) -> Store:
@@ -81,6 +89,7 @@ def test_sale_decrements_stock_by_exactly_the_sold_quantity(client, db) -> None:
     response = client.post(
         f"/billing/transactions?store_id={store.id}",
         json={"lines": [{"product_id": product.id, "qty": 3}], "payment_mode": "upi"},
+        headers=_idempotency_key(),
     )
     assert response.status_code == 201, response.text
     body = response.json()
@@ -103,6 +112,7 @@ def test_oversell_returns_409_and_changes_nothing(client, db) -> None:
     response = client.post(
         f"/billing/transactions?store_id={store.id}",
         json={"lines": [{"product_id": product.id, "qty": 5}]},
+        headers=_idempotency_key(),
     )
     assert response.status_code == 409
     detail = response.json()["detail"]
@@ -126,11 +136,13 @@ def test_invoice_numbers_are_sequential_per_store(client, db) -> None:
             client.post(
                 f"/billing/transactions?store_id={first.id}",
                 json={"lines": [{"product_id": product_a.id, "qty": 1}]},
+                headers=_idempotency_key(),
             ).json()["invoice_no"]
         )
     other = client.post(
         f"/billing/transactions?store_id={second.id}",
         json={"lines": [{"product_id": product_b.id, "qty": 1}]},
+        headers=_idempotency_key(),
     ).json()["invoice_no"]
 
     assert numbers == [f"INV-{first.id:02d}-00001", f"INV-{first.id:02d}-00002"]
@@ -143,6 +155,7 @@ def test_refund_returns_the_stock(client, db) -> None:
     sale = client.post(
         f"/billing/transactions?store_id={store.id}",
         json={"lines": [{"product_id": product.id, "qty": 4}]},
+        headers=_idempotency_key(),
     ).json()
 
     refunded = client.post(
@@ -168,10 +181,12 @@ def test_invoice_renders_with_the_right_unit_label_per_store(client, db) -> None
     grocery_sale = client.post(
         f"/billing/transactions?store_id={grocery.id}",
         json={"lines": [{"product_id": grocery_product.id, "qty": 2}]},
+        headers=_idempotency_key(),
     ).json()
     pharmacy_sale = client.post(
         f"/billing/transactions?store_id={pharmacy.id}",
         json={"lines": [{"product_id": pharmacy_product.id, "qty": 2}]},
+        headers=_idempotency_key(),
     ).json()
 
     grocery_html = client.get(
@@ -195,6 +210,7 @@ def test_invoice_pdf_endpoint_answers(client, db) -> None:
     sale = client.post(
         f"/billing/transactions?store_id={store.id}",
         json={"lines": [{"product_id": product.id, "qty": 1}]},
+        headers=_idempotency_key(),
     ).json()
 
     response = client.get(
@@ -212,5 +228,6 @@ def test_selling_another_stores_product_is_404(client, db) -> None:
     response = client.post(
         f"/billing/transactions?store_id={mine.id}",
         json={"lines": [{"product_id": their_product.id, "qty": 1}]},
+        headers=_idempotency_key(),
     )
     assert response.status_code == 404

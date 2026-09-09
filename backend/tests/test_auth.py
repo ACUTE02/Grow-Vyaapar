@@ -5,6 +5,8 @@ assertion here is a hand-crafted request, exactly what an examiner would try.
 """
 from __future__ import annotations
 
+import uuid
+
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -14,6 +16,12 @@ from app.models.admin import AuditLog, User
 from app.models.core import Batch, Product, StockLevel
 from app.security import decode_token, hash_password, verify_password
 from tests.test_segmentation import _store
+
+
+def _idempotency_key() -> dict[str, str]:
+    """A fresh Idempotency-Key per checkout, which the sale endpoint requires."""
+    return {"Idempotency-Key": uuid.uuid4().hex}
+
 
 
 def _product(db, store, sku: str = "STP-1", price: str = "100.00") -> Product:
@@ -137,6 +145,7 @@ def test_a_cashier_can_still_bill(role_client, db) -> None:
     response = client.post(
         f"/billing/transactions?store_id={store.id}",
         json={"lines": [{"product_id": product.id, "qty": 1}]},
+        headers=_idempotency_key(),
     )
     assert response.status_code == 201
 

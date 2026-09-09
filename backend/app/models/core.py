@@ -128,6 +128,14 @@ class Transaction(Base):
     __tablename__ = "transactions"
     __table_args__ = (
         UniqueConstraint("store_id", "invoice_no", name="uq_txn_store_invoice"),
+        # One logical checkout, one bill. The database is the final authority
+        # on that, not a disabled button: two requests carrying the same key
+        # race, and exactly one of them gets a row. Scoped by store, so two
+        # shops can generate the same key without colliding, and nullable
+        # because NULLs are distinct in a unique index on both SQLite and
+        # Postgres - which leaves every bill written before this existed, and
+        # every sale the seed writes directly, unaffected.
+        UniqueConstraint("store_id", "idempotency_key", name="uq_txn_store_idempotency"),
         Index("ix_txn_store_created", "store_id", "created_at"),
     )
 
@@ -135,6 +143,8 @@ class Transaction(Base):
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"), index=True)
     invoice_no: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Supplied by the client, one per checkout. See the unique constraint above.
+    idempotency_key: Mapped[str | None] = mapped_column(String(64))
     subtotal: Mapped[Decimal] = mapped_column(Money, nullable=False, default=Decimal("0.00"))
     discount: Mapped[Decimal] = mapped_column(Money, nullable=False, default=Decimal("0.00"))
     gst_amount: Mapped[Decimal] = mapped_column(Money, nullable=False, default=Decimal("0.00"))

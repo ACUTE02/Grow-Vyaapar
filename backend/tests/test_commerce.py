@@ -1,6 +1,8 @@
 """Coupons, loyalty, referrals and attribution."""
 from __future__ import annotations
 
+import uuid
+
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -15,6 +17,12 @@ from app.models.core import Customer, Product, StockLevel
 from app.services import coupon_service, loyalty_service
 from app.verticals.context import resolve_store_context
 from tests.test_segmentation import _store
+
+
+def _idempotency_key() -> dict[str, str]:
+    """A fresh Idempotency-Key per checkout, which the sale endpoint requires."""
+    return {"Idempotency-Key": uuid.uuid4().hex}
+
 
 PHONES = iter(range(4_000_000, 5_000_000))
 
@@ -50,7 +58,7 @@ def _sell(client, store, product, customer=None, **extra):
     if customer is not None:
         body["customer_id"] = customer.id
     body.update(extra)
-    return client.post(f"/billing/transactions?store_id={store.id}", json=body)
+    return client.post(f"/billing/transactions?store_id={store.id}", json=body, headers=_idempotency_key())
 
 
 # -- coupons -----------------------------------------------------------------

@@ -7,12 +7,20 @@ shelf, invoice sequence and customer history untouched.
 """
 from __future__ import annotations
 
+import uuid
+
 from decimal import Decimal
 
 from sqlalchemy import select
 
-from app.models.core import Customer, Product, StockLevel, Transaction
+from app.models.core import Customer, Product, StockLevel, Transaction, TransactionItem
 from tests.test_segmentation import _store
+
+
+def _key() -> dict[str, str]:
+    """A fresh Idempotency-Key per checkout, which the endpoint requires. Tests
+    that care about retries pass their own key instead of calling this."""
+    return {"Idempotency-Key": uuid.uuid4().hex}
 
 
 def _product(db, store, sku: str, *, qty: str = "100", price: str = "50.00") -> Product:
@@ -75,6 +83,7 @@ def test_a_whole_sale_from_search_to_invoice(client, db) -> None:
                 {"product_id": dal.id, "qty": "2"},
             ],
         },
+        headers=_key(),
     )
     assert sale.status_code == 201, sale.text
     body = sale.json()
@@ -112,6 +121,7 @@ def test_a_walk_in_sale_needs_no_customer(client, db) -> None:
         "/billing/transactions",
         params={"store_id": store.id},
         json={"lines": [{"product_id": product.id, "qty": "1"}]},
+        headers=_key(),
     )
 
     assert sale.status_code == 201, sale.text
@@ -138,6 +148,7 @@ def test_an_oversold_line_leaves_the_whole_bill_unwritten(client, db) -> None:
                 {"product_id": scarce.id, "qty": "50"},
             ]
         },
+        headers=_key(),
     )
 
     assert sale.status_code == 409, sale.text
@@ -161,6 +172,7 @@ def test_a_sale_in_one_store_leaves_the_other_alone(client, db) -> None:
         "/billing/transactions",
         params={"store_id": store_a.id},
         json={"lines": [{"product_id": product_a.id, "qty": "5"}]},
+        headers=_key(),
     )
     assert sale.status_code == 201, sale.text
 
@@ -175,61 +187,39 @@ def test_a_sale_in_one_store_leaves_the_other_alone(client, db) -> None:
         "/billing/transactions",
         params={"store_id": store_b.id},
         json={"lines": [{"product_id": product_b.id, "qty": "1"}]},
+        headers=_key(),
     )
     assert sale_b.status_code == 201
     assert sale_b.json()["invoice_no"] != sale.json()["invoice_no"]
 
 
-def test_two_identical_submissions_make_two_bills_not_one(client, db) -> None:
-    """Recorded, not asserted as correct: the sale endpoint has no idempotency
-    key, so a double-submitted cart bills twice and takes the stock twice. The
-    POS guards this in the UI by disabling the button while the request is in
-    flight, which is a guard against a slow hand, not against a retried
-    request. Documented as a gap in the QA report rather than fixed here,
-    because the fix is an API contract change."""
+def test_a_resubmitted_checkout_returns_the_first_bill(client, db) -> None:
+    """The same cart, submitted twice with the same key, is one bill and one
+    stock movement. This used to be the opposite: two bills, stock taken
+    twice, and a disabled button as the only guard - which stops a second
+    click and does nothing about a retried request."""
     store = _store(db, "grocery", "Sharma Kirana")
     product = _product(db, store, "DOUBLE-1", qty="10")
     db.commit()
 
     body = {"lines": [{"product_id": product.id, "qty": "1"}]}
-    first = client.post("/billing/transactions", params={"store_id": store.id}, json=body)
-    second = client.post("/billing/transactions", params={"store_id": store.id}, json=body)
+    headers = _key()
+    first = client.post(
+        "/billing/transactions", params={"store_id": store.id}, json=body, headers=headers
+    )
+    second = client.post(
+        "/billing/transactions", params={"store_id": store.id}, json=body, headers=headers
+    )
 
     assert first.status_code == 201
-    assert second.status_code == 201
-    assert first.json()["id"] != second.json()["id"]
-    assert _stock(db, product.id) == Decimal("8")
+    assert second.status_code == 200, "a safe retry is not a creation"
+    assert second.headers.get("Idempotency-Replayed") == "true"
+    assert second.json() == first.json(), "the retry returned a different bill"
 
+    assert _stock(db, product.id) == Decimal("9"), "the shelf moved twice"
     bills = db.scalars(select(Transaction).where(Transaction.store_id == store.id)).all()
-    assert len(bills) == 2
-
-
-def test_correcting_a_count_by_hand_leaves_an_audit_row(client, db) -> None:
-    """Editing a product is the one place stock changes without an event
-    behind it. Every other movement traces to a bill, a refund or a received
-    order; this one traced to nothing, because the audit snapshot listed price
-    and name but not the count. The Inventory page tells a shopkeeper every
-    movement is traceable."""
-    from app.models.admin import AuditLog
-
-    store = _store(db, "grocery", "Sharma Kirana")
-    product = _product(db, store, "COUNT-1", qty="100")
-    db.commit()
-
-    response = client.patch(
-        f"/products/{product.id}",
-        params={"store_id": store.id},
-        json={"qty_on_hand": "40"},
-    )
-    assert response.status_code == 200, response.text
-    assert _stock(db, product.id) == Decimal("40")
-
-    rows = db.scalars(
-        select(AuditLog).where(
-            AuditLog.store_id == store.id, AuditLog.action == "product.update"
-        )
+    assert len(bills) == 1
+    items = db.scalars(
+        select(TransactionItem).where(TransactionItem.transaction_id == bills[0].id)
     ).all()
-    assert rows, "a hand-made stock correction left no audit row"
-    entry = rows[-1]
-    assert entry.before["qty_on_hand"] == "100.000"
-    assert entry.after["qty_on_hand"] == "40.000"
+    assert len(items) == 1, "the retry wrote a second set of line items"

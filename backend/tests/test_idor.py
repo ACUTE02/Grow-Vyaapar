@@ -12,6 +12,8 @@ long as no data comes back and no write lands.
 """
 from __future__ import annotations
 
+import uuid
+
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -24,6 +26,12 @@ from app.models.core import Customer, Job, Product, StockLevel, Transaction
 from tests.test_segmentation import _store
 
 REFUSED = (403, 404)
+
+def _key() -> dict[str, str]:
+    """A fresh Idempotency-Key per checkout, which the endpoint requires. Tests
+    that care about retries pass their own key instead of calling this."""
+    return {"Idempotency-Key": uuid.uuid4().hex}
+
 
 
 @pytest.fixture()
@@ -367,6 +375,7 @@ def test_a_bill_cannot_be_built_from_another_stores_product(
         "/billing/transactions",
         params={"store_id": attacker_store.id},
         json={"lines": [{"product_id": victim_product.id, "qty": "2"}]},
+        headers=_key(),
     )
 
     assert response.status_code in (400, 403, 404, 409, 422), response.text
@@ -393,6 +402,7 @@ def test_a_bill_cannot_be_attached_to_another_stores_customer(
             "customer_id": victim_customer.id,
             "lines": [{"product_id": own_product.id, "qty": "1"}],
         },
+        headers=_key(),
     )
 
     assert response.status_code in (400, 403, 404, 409, 422), response.text

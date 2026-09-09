@@ -16,6 +16,22 @@ import type { CustomerListItem, Product, Transaction } from "@/lib/types";
 
 type Line = { product: Product; qty: number };
 
+/**
+ * A key identifying one checkout, sent as Idempotency-Key.
+ *
+ * crypto.randomUUID needs a secure context, which localhost and https both
+ * are; the fallback is there so a plain-http deployment degrades to a still
+ * unguessable key rather than to no key at all, which the API would refuse.
+ */
+function newCheckoutKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export default function PosPage({ params }: { params: Promise<{ storeId: string }> }) {
   const { storeId: raw } = use(params);
   const storeId = Number(raw);
@@ -59,6 +75,7 @@ export default function PosPage({ params }: { params: Promise<{ storeId: string 
   );
   const products = useProducts(storeId, productQuery);
   const sale = useCreateSale(storeId);
+  const checkoutKey = useRef<string | null>(null);
 
   // Derived during render, not stored in an effect: the totals are a function
   // of the cart and nothing else.
@@ -102,15 +119,29 @@ export default function PosPage({ params }: { params: Promise<{ storeId: string 
     }
     setFailure(null);
 
+    // One key per checkout, not per request. It is minted on the first attempt
+    // and kept until a bill actually exists, so pressing Complete sale again
+    // after a timeout sends the same key and gets the first bill back instead
+    // of writing a second one. A disabled button cannot do this: it stops a
+    // second click and knows nothing about a request that was resent.
+    checkoutKey.current ??= newCheckoutKey();
+
     sale.mutate(
       {
-        customer_id: customer?.id ?? null,
-        lines: payload,
-        discount,
-        payment_mode: paymentMode,
+        idempotencyKey: checkoutKey.current,
+        body: {
+          customer_id: customer?.id ?? null,
+          lines: payload,
+          discount,
+          payment_mode: paymentMode,
+        },
       },
       {
         onSuccess: (invoice) => {
+          // The bill exists, so this checkout is over and the next one is a
+          // new one. Cleared here rather than on failure: a failed attempt has
+          // written nothing, and its key is still the right one to retry with.
+          checkoutKey.current = null;
           setLastInvoice(invoice);
           setLines(new Map());
           setDiscount(0);
