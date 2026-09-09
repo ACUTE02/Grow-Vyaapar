@@ -25,6 +25,25 @@ logger = logging.getLogger(__name__)
 
 RETRYABLE_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
 
+# Gemini's flash models are reasoning models: they spend part of
+# maxOutputTokens on an internal "thinking" pass before writing a single word
+# of the reply, and the budget covers both. Measured against gemini-3.6-flash
+# on this project's own prompts, thinking cost between 380 and 1441 tokens
+# while the answer itself never exceeded 135 - so a caller asking for 320 or
+# 400 got a reply cut off mid-sentence every single time, which _call_gemini
+# correctly discards and which left every caption, insight and image prompt
+# silently falling back to a template. The app looked as though its LLM were
+# switched on; nothing it wrote had ever come from one.
+#
+# Callers ask for the length of the *answer* they want. This reserve is what
+# the model needs before it starts writing, added on top, so a caller's number
+# keeps meaning what it says. It is set well clear of the worst measured
+# thinking pass rather than at it, because that cost varies run to run on an
+# identical prompt: a reserve sized to the average brings the bug back
+# intermittently, which is harder to notice than having it back always.
+# Groq's llama has no such pass and needs none.
+GEMINI_THINKING_RESERVE = 2048
+
 
 # --------------------------------------------------------------------------- #
 # throttle
@@ -155,15 +174,25 @@ def _call_groq(prompt: str, max_tokens: int, timeout: float) -> str | None:
 def _call_gemini(prompt: str, max_tokens: int, timeout: float) -> str | None:
     if not settings.gemini_api_key:
         return None
-    url = (
-        f"{settings.gemini_base_url}/{settings.gemini_model}:generateContent"
-        f"?key={settings.gemini_api_key}"
-    )
+    # The key travels in a header, never in the query string. Google accepts
+    # both, but httpx puts the request URL into every error it raises, and
+    # `call()` below logs those errors - so `?key=...` would write the live
+    # API key into the application log on any 4xx, 5xx or connection failure.
+    # A header keeps it out of the URL and therefore out of the logs.
+    url = f"{settings.gemini_base_url}/{settings.gemini_model}:generateContent"
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.6},
+        "generationConfig": {
+            "maxOutputTokens": max_tokens + GEMINI_THINKING_RESERVE,
+            "temperature": 0.6,
+        },
     }
-    response = httpx.post(url, json=payload, timeout=timeout)
+    response = httpx.post(
+        url,
+        json=payload,
+        headers={"x-goog-api-key": settings.gemini_api_key},
+        timeout=timeout,
+    )
     response.raise_for_status()
     data = response.json()
     candidate = data["candidates"][0]

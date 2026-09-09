@@ -28,8 +28,11 @@ MAX_PROMPT_CHARS = 380
 def poster_url(visual_prompt: str, *, seed: int) -> str:
     """Pollinations takes the prompt in the path. No key, no auth, no SDK."""
     trimmed = visual_prompt.strip()[:MAX_PROMPT_CHARS]
+    # safe="" so a slash inside the description ("black/white frames") is
+    # escaped rather than becoming a path separator: quote() leaves "/" alone
+    # by default, and the prompt is a path segment here, not a path.
     return (
-        f"{settings.pollinations_base_url}/{quote(trimmed)}"
+        f"{settings.pollinations_base_url}/{quote(trimmed, safe='')}"
         f"?width=1024&height=1024&nologo=true&seed={seed}"
     )
 

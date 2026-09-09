@@ -228,3 +228,80 @@ def test_a_quota_error_mid_run_leaves_every_message_usable(rules, monkeypatch) -
     for reminder in reminders:
         assert reminder.message and "{" not in reminder.message
         assert store.name in reminder.message
+
+
+# -- the key must not reach a log ---------------------------------------------
+def test_the_gemini_key_travels_in_a_header_not_the_url(monkeypatch) -> None:
+    """A query-string key ends up in httpx's error text, and `call()` logs that.
+
+    Google accepts the key either way, so this is free to get right; getting it
+    wrong writes a live credential into the application log the first time
+    Gemini answers with a 429, which on a free tier is routine.
+    """
+    seen: dict[str, object] = {}
+
+    def _capture(url, *, json, headers=None, timeout=None):  # noqa: A002
+        seen["url"] = url
+        seen["headers"] = headers or {}
+        request = httpx.Request("POST", url)
+        return httpx.Response(
+            200,
+            request=request,
+            json={"candidates": [{"content": {"parts": [{"text": "ok"}]}}]},
+        )
+
+    monkeypatch.setattr(llm.settings, "gemini_api_key", "SECRET-KEY-VALUE")
+    monkeypatch.setattr(llm.httpx, "post", _capture)
+
+    assert llm._call_gemini("hello", 100, 5.0) == "ok"
+    assert "SECRET-KEY-VALUE" not in str(seen["url"])
+    assert seen["headers"]["x-goog-api-key"] == "SECRET-KEY-VALUE"
+
+
+def test_a_failing_gemini_call_does_not_log_the_key(monkeypatch, caplog) -> None:
+    """The end-to-end version of the rule above: force a 429 and read the log."""
+
+    def _refuse(url, *, json, headers=None, timeout=None):  # noqa: A002
+        request = httpx.Request("POST", url)
+        response = httpx.Response(429, request=request, text="quota exceeded")
+        response.raise_for_status()
+
+    monkeypatch.setattr(llm.settings, "gemini_api_key", "SECRET-KEY-VALUE")
+    monkeypatch.setattr(llm.settings, "groq_api_key", None)
+    monkeypatch.setattr(llm.httpx, "post", _refuse)
+
+    with caplog.at_level("DEBUG"):
+        assert llm.call("hello", use_cache=False) is None
+
+    assert "SECRET-KEY-VALUE" not in caplog.text
+
+
+def test_gemini_gets_a_thinking_budget_on_top_of_the_asked_for_length(monkeypatch) -> None:
+    """A caller asking for 400 tokens of answer must not be cut off by thinking.
+
+    gemini-3.6-flash spends 380-1441 tokens reasoning before it writes anything,
+    and maxOutputTokens covers both passes. Sending the caller's number
+    unchanged meant every reply came back finishReason=MAX_TOKENS and was
+    discarded - the app ran entirely on template fallbacks while looking, from
+    the outside, as though the LLM were switched on.
+    """
+    sent: dict[str, object] = {}
+
+    def _capture(url, *, json, headers=None, timeout=None):  # noqa: A002
+        sent["config"] = json["generationConfig"]
+        request = httpx.Request("POST", url)
+        return httpx.Response(
+            200,
+            request=request,
+            json={"candidates": [{"content": {"parts": [{"text": "ok"}]}}]},
+        )
+
+    monkeypatch.setattr(llm.settings, "gemini_api_key", "g-key")
+    monkeypatch.setattr(llm.httpx, "post", _capture)
+
+    llm._call_gemini("hello", 400, 5.0)
+    budget = sent["config"]["maxOutputTokens"]
+    assert budget == 400 + llm.GEMINI_THINKING_RESERVE
+    # The reserve has to clear the worst thinking pass measured on this
+    # project's own prompts, or the bug comes back for the longest of them.
+    assert llm.GEMINI_THINKING_RESERVE >= 1600

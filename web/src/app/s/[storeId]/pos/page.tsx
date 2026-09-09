@@ -237,8 +237,13 @@ export default function PosPage({ params }: { params: Promise<{ storeId: string 
                         GST {product.gst_rate}%
                       </span>
                     </span>
+                    {/* Narrower on a phone. At 375px a fixed 5rem here left the
+                        product name 75px and truncated it to "Aloo Bhuj...",
+                        which three different snacks all share - the one column
+                        a cashier reads first was the one being squeezed by the
+                        one they glance at. */}
                     <span
-                      className={`tnum w-20 shrink-0 text-right text-xs ${out ? "text-danger" : "text-ink-2"}`}
+                      className={`tnum w-14 shrink-0 text-right text-xs sm:w-20 ${out ? "text-danger" : "text-ink-2"}`}
                     >
                       {quantity(product.qty_on_hand, product.unit_label)}
                     </span>
