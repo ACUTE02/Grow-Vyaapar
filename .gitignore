@@ -2,13 +2,16 @@
 __pycache__/
 *.py[cod]
 *.db
-.env
+# Every env file, however it is suffixed - .env.local and .env.production
+# were slipping through a bare ".env" pattern, which is the one mistake in
+# this file that would commit a live Twilio token.
+.env*
+!.env.example
 .pytest_cache/
 .streamlit/secrets.toml
 docs/.gitkeep
 backend/models/
 node_modules/
 web/.next/
-web/.env.local
 
 backend/static/campaigns/
