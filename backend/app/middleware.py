@@ -26,6 +26,11 @@ MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 
 PUBLIC_PATHS = (
     "/health",
+    # Composed campaign posters. An <img> tag carries no Authorization header,
+    # so anything served here has to be reachable without one - the filename is
+    # a hash rather than a guessable id, and a poster is a picture the
+    # shopkeeper is about to share anyway.
+    "/static/",
     "/docs",
     "/redoc",
     "/openapi.json",
@@ -90,7 +95,10 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             )
 
         # A user tied to one store cannot reach another store's data, whatever
-        # the query string says.
+        # the query string says. This is the early refusal; the same rule is
+        # enforced again in the store-context dependency, which is the one that
+        # also sees a store named in the path - middleware runs before routing,
+        # so path parameters do not exist yet here.
         user_store = claims.get("store_id")
         asked_for = request.query_params.get("store_id")
         if user_store is not None and asked_for and str(user_store) != str(asked_for):

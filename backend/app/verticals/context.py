@@ -9,7 +9,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from fastapi import Depends, HTTPException, Path, status
+from fastapi import Depends, HTTPException, Path, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -38,6 +38,7 @@ class StoreContext:
     store_id: int
     store_name: str
     city: str
+    address: str | None
     language: str
     gstin: str | None
     google_review_url: str | None
@@ -88,6 +89,7 @@ class StoreContext:
             "store_id": self.store_id,
             "store_name": self.store_name,
             "city": self.city,
+            "address": self.address,
             "language": self.language,
             "gstin": self.gstin,
             "google_review_url": self.google_review_url,
@@ -125,6 +127,7 @@ def resolve_store_context(db: Session, store_id: int) -> StoreContext:
         store_id=store.id,
         store_name=store.name,
         city=store.city,
+        address=store.address,
         language=store.language,
         gstin=store.gstin,
         google_review_url=store.google_review_url,
@@ -140,11 +143,34 @@ def resolve_store_context(db: Session, store_id: int) -> StoreContext:
     )
 
 
+def guard_tenant(request: Request, store_id: int) -> None:
+    """Refuse a store this user does not belong to.
+
+    The authorisation middleware makes the same check, but only against the
+    query string: it runs before routing, so a store named in the *path* is
+    invisible to it. That left /config/stores/{store_id}/... readable and
+    writable across tenants. Here the store id is already resolved, whichever
+    way it arrived, so every route that takes a StoreContext is covered - and
+    any route added later is covered by construction.
+
+    An unscoped user (store_id NULL - the platform owner) reaches every store,
+    which is the point of the role.
+    """
+    user_store = getattr(request.state, "user_store_id", None)
+    if user_store is not None and int(user_store) != int(store_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Your account belongs to store {user_store}, not store {store_id}.",
+        )
+
+
 def get_store_context(
+    request: Request,
     store_id: int = Path(..., ge=1, description="Store the request acts on"),
     db: Session = Depends(get_db),
 ) -> StoreContext:
     """FastAPI dependency for routes with a {store_id} path parameter."""
+    guard_tenant(request, store_id)
     try:
         return resolve_store_context(db, store_id)
     except StoreNotFound as exc:
@@ -152,10 +178,12 @@ def get_store_context(
 
 
 def get_store_context_from_query(
+    request: Request,
     store_id: int,
     db: Session = Depends(get_db),
 ) -> StoreContext:
     """FastAPI dependency for routes that take store_id as a query parameter."""
+    guard_tenant(request, store_id)
     try:
         return resolve_store_context(db, store_id)
     except StoreNotFound as exc:

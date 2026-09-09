@@ -4,13 +4,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import audit
 from app.db import get_db
+from app.ratelimit import login_limiter
 from app.models.admin import ROLES, User
 from app.security import (
     authenticate,
@@ -78,18 +79,41 @@ def _as_out(user: User) -> dict[str, Any]:
 
 
 @router.post("/login", response_model=TokenOut)
-def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)) -> dict:
+def login(
+    payload: LoginIn,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> dict:
     """The password is checked and discarded. Only a token comes back."""
+    # Keyed on the caller, not the email, so guessing many emails from one
+    # address is throttled just as hard as guessing one password many times.
+    caller = request.client.host if request.client else "unknown"
+    retry_after = login_limiter.check(caller)
+    if retry_after:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "Too many sign-in attempts. Wait "
+                f"{retry_after} second{'s' if retry_after != 1 else ''} and try again."
+            ),
+            headers={"Retry-After": str(retry_after)},
+        )
+
     user = authenticate(db, payload.email, payload.password)
     if user is None:
         # Deliberately vague: do not leak which half was wrong.
         raise NotFoundError("Email or password is not correct")
 
+    # A correct password clears the budget: a busy counter signing people in
+    # and out all morning must never be locked out by its own success.
+    login_limiter.reset(caller)
     token = create_token(user)
     response.set_cookie(
         settings.jwt_cookie_name,
         token,
         httponly=True,
+        secure=settings.cookie_secure,
         samesite="lax",
         max_age=settings.jwt_expiry_minutes * 60,
     )
@@ -103,7 +127,14 @@ def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)) -
 
 @router.post("/logout")
 def logout(response: Response) -> dict:
-    response.delete_cookie(settings.jwt_cookie_name)
+    # The attributes must match the ones it was set with, or the browser keeps
+    # the cookie and "sign out" quietly does nothing.
+    response.delete_cookie(
+        settings.jwt_cookie_name,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+    )
     return {"detail": "Signed out"}
 
 
