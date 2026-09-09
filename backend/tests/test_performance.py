@@ -9,6 +9,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import event, select
 
 from app.models.core import Customer, Product, StockLevel, Transaction, TransactionItem
@@ -197,3 +198,23 @@ def test_an_unexpected_error_never_leaks_a_stack_trace(client, db, monkeypatch) 
     assert "Traceback" not in response.text
     assert body["request_id"]
     assert "Nothing was changed" in body["detail"]
+
+
+def test_the_suite_enforces_foreign_keys_like_production_does(db) -> None:
+    """SQLite leaves referential integrity off unless asked, and the test engine
+    is built in conftest rather than imported from app/db.py, so it did not
+    inherit the pragma the application sets. The suite accepted a customer
+    belonging to store 424242. A referential bug would have passed here and
+    failed in production."""
+    from sqlalchemy import text
+
+    assert db.execute(text("PRAGMA foreign_keys")).scalar() == 1
+
+    with pytest.raises(Exception):
+        db.execute(
+            text(
+                "INSERT INTO customers (store_id, name, phone, marketing_opt_in, created_at) "
+                "VALUES (424242, 'Orphan', '9000000000', 1, '2026-01-01')"
+            )
+        )
+        db.flush()

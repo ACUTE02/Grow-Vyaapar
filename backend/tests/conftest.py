@@ -39,7 +39,7 @@ for _credential in (
 ):
     os.environ[_credential] = ""
 
-from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy import create_engine, event  # noqa: E402
 from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 
 from app.models import Base  # noqa: E402
@@ -60,6 +60,19 @@ def engine(tmp_path: Path):
             connect_args={"check_same_thread": False},
             future=True,
         )
+
+        # app/db.py sets this on the application's own engine, and this one is
+        # built here rather than imported, so it was running without it: SQLite
+        # leaves foreign keys off by default, and the suite happily accepted a
+        # customer belonging to a store that does not exist. A referential bug
+        # would have passed here and failed in production, which is the wrong
+        # way round.
+        @event.listens_for(eng, "connect")
+        def _sqlite_pragmas(dbapi_connection, connection_record):  # noqa: ANN001, ARG001
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
         Base.metadata.create_all(eng)
         try:
             yield eng
