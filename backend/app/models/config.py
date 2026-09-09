@@ -40,6 +40,9 @@ class Store(Base):
     vertical_id: Mapped[int] = mapped_column(ForeignKey("verticals.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     city: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Street address, for the bottom of a printed poster. Optional: a store
+    # that has not filled it in simply gets one fewer line.
+    address: Mapped[str | None] = mapped_column(String(256))
     gstin: Mapped[str | None] = mapped_column(String(20))
     google_review_url: Mapped[str | None] = mapped_column(String(512))
     whatsapp_number: Mapped[str | None] = mapped_column(String(20))

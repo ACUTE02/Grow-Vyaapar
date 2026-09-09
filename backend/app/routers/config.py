@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -20,10 +20,11 @@ from app.schemas.config import (
     ReminderRuleOut,
     StoreConfigIn,
     StoreContextOut,
+    StoreDetailsIn,
     StoreSummary,
     VerticalOut,
 )
-from app.verticals.context import StoreContext, get_store_context
+from app.verticals.context import StoreContext, get_store_context, resolve_store_context
 
 router = APIRouter(prefix="/config", tags=["config"])
 
@@ -53,6 +54,30 @@ def list_stores(db: Session = Depends(get_db)) -> list[StoreSummary]:
 @router.get("/stores/{store_id}/context", response_model=StoreContextOut)
 def get_context(context: StoreContext = Depends(get_store_context)) -> StoreContextOut:
     return StoreContextOut(**context.as_dict())
+
+
+@router.patch("/stores/{store_id}", response_model=StoreContextOut)
+def update_store_details(
+    payload: StoreDetailsIn,
+    store_id: int = Path(..., ge=1),
+    context: StoreContext = Depends(get_store_context),
+    db: Session = Depends(get_db),
+) -> StoreContextOut:
+    """Store identity - address, WhatsApp number, review link.
+
+    Separate from the config endpoint next door because these are columns on
+    the store, not vertical thresholds the agent reads. Only what was sent is
+    written, so clearing one field cannot blank the others.
+    """
+    store = db.get(Store, context.store_id)
+    if store is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Store not found")
+
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(store, key, (value or None) if isinstance(value, str) else value)
+    db.commit()
+
+    return StoreContextOut(**resolve_store_context(db, context.store_id).as_dict())
 
 
 @router.put("/stores/{store_id}/config", response_model=StoreContextOut)

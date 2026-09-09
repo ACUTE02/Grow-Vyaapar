@@ -600,3 +600,39 @@ def test_every_adapter_returns_a_result_rather_than_raising(outbox, monkeypatch)
         result = get_adapter().send(reminder, db)
         assert isinstance(result, DeliveryResult)
         assert result.status in {"sent", "failed"}
+
+
+def test_a_single_send_reports_why_it_failed(client, db, rules) -> None:
+    """The response has to carry the reason the row carries. It used to say
+    "failed" with provider_response null while the database knew exactly why,
+    which left the Outbox showing a failure with no explanation until the list
+    happened to refetch."""
+    from app.models.agent import Reminder
+    from app.models.core import Customer
+    from tests.test_segmentation import _store
+
+    store = _store(db, "grocery", "Reason Store")
+    customer = Customer(
+        store_id=store.id, name="Opted Out", phone="9800000123", marketing_opt_in=False
+    )
+    db.add(customer)
+    db.flush()
+    reminder = Reminder(
+        store_id=store.id,
+        customer_id=customer.id,
+        kind="review_request",
+        channel="whatsapp",
+        message="hello",
+        status="queued",
+    )
+    db.add(reminder)
+    db.commit()
+
+    response = client.post(
+        f"/marketing/reminders/{reminder.id}/send", params={"store_id": store.id}
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "failed"
+    assert body["provider_response"] == "customer has opted out of marketing messages"

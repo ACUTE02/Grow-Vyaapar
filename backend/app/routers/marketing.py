@@ -1,6 +1,8 @@
 """Everything the marketing agent owns: segments, outbox, insights, campaigns."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -193,6 +195,9 @@ def send_reminder(
         "status": reminder.status,
         "scheduled_for": reminder.scheduled_for,
         "sent_at": reminder.sent_at,
+        # Was omitted, so this response said "failed" with no reason while the
+        # row itself carried one - the caller had to refetch to learn why.
+        "provider_response": reminder.provider_response,
         "created_at": reminder.created_at,
     }
 
@@ -315,7 +320,45 @@ def create_campaign(
     context: StoreContext = Depends(get_store_context_from_query),
     db: Session = Depends(get_db),
 ) -> Campaign:
-    campaign, _ = campaign_agent.create(db, context, payload.occasion)
+    campaign, _ = campaign_agent.create(
+        db, context, payload.occasion, offer_text=payload.offer_text
+    )
+    db.commit()
+    db.refresh(campaign)
+    return campaign
+
+
+@router.post("/campaigns/{campaign_id}/regenerate", response_model=CampaignOut)
+def regenerate_campaign(
+    campaign_id: int,
+    context: StoreContext = Depends(get_store_context_from_query),
+    db: Session = Depends(get_db),
+) -> Campaign:
+    """Redraw an existing campaign from its own occasion and offer.
+
+    In place, so a second attempt replaces the poster rather than adding a
+    near-duplicate to the history. Refused once published: replacing a poster
+    the shopkeeper has already started sharing is not something to do by
+    accident.
+    """
+    campaign = db.get(Campaign, campaign_id)
+    if campaign is None or campaign.store_id != context.store_id:
+        raise NotFoundError(f"Campaign {campaign_id} does not belong to {context.store_name}")
+    if campaign.status == "published":
+        raise ConflictError(
+            "This campaign is published. Regenerating would replace a poster that is "
+            "already in use - set it back to saved first if that is what you want."
+        )
+
+    # A new seed, or the generator returns the same picture for the same prompt.
+    campaign_agent.create(
+        db,
+        context,
+        campaign.occasion,
+        offer_text=campaign.offer_text,
+        seed=int(datetime.now(timezone.utc).timestamp()) % 100_000,
+        campaign=campaign,
+    )
     db.commit()
     db.refresh(campaign)
     return campaign

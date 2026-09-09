@@ -69,6 +69,8 @@ class InsightOut(BaseModel):
 
 class CampaignIn(BaseModel):
     occasion: str = Field(min_length=2, max_length=96)
+    # Printed onto the poster itself, not just mentioned in the caption.
+    offer_text: str | None = Field(default=None, max_length=140)
 
 
 class CampaignOut(BaseModel):
@@ -77,6 +79,7 @@ class CampaignOut(BaseModel):
     id: int
     store_id: int
     occasion: str
+    offer_text: str | None = None
     prompt: str | None = None
     caption: str | None = None
     hashtags: list[str] = []

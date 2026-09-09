@@ -15,6 +15,7 @@ from app.llm import client as llm
 from app.llm import prompts
 from app.models.agent import Campaign
 from app.services import batch_service, stock_service
+from app.services.poster import compose_poster
 from app.services.errors import NotFoundError
 from app.settings import settings
 from app.verticals.context import StoreContext
@@ -63,9 +64,20 @@ def _visual_fallback(context: StoreContext, occasion: str, products: list[dict])
 
 
 def create(
-    db: Session, context: StoreContext, occasion: str, *, seed: int | None = None
+    db: Session,
+    context: StoreContext,
+    occasion: str,
+    *,
+    offer_text: str | None = None,
+    seed: int | None = None,
+    campaign: Campaign | None = None,
 ) -> tuple[Campaign, str]:
-    """Draft one campaign. Returns the row and the source: llm or template."""
+    """Draft one campaign. Returns the row and the source: llm or template.
+
+    Pass `campaign` to redraw an existing row in place, which is what Regenerate
+    does - a second attempt at the same occasion should replace the poster, not
+    add a near-duplicate to the history the shopkeeper scrolls through.
+    """
     if not occasion.strip():
         raise NotFoundError("An occasion is required to draft a campaign")
 
@@ -140,16 +152,31 @@ def create(
         if described:
             visual = described.strip().strip('"')[:MAX_PROMPT_CHARS]
 
-    campaign = Campaign(
-        store_id=context.store_id,
-        occasion=occasion.strip(),
-        prompt=visual,
-        caption=caption,
-        hashtags=hashtags,
-        image_url=poster_url(visual, seed=seed if seed is not None else context.store_id * 101),
-        status="draft",
+    if campaign is None:
+        campaign = Campaign(store_id=context.store_id, status="draft")
+        db.add(campaign)
+
+    campaign.occasion = occasion.strip()
+    campaign.offer_text = (offer_text or "").strip() or None
+    campaign.prompt = visual
+    campaign.caption = caption
+    campaign.hashtags = hashtags
+    # Flushed before composing so a new row has an id to key its poster file on.
+    db.flush()
+
+    background = poster_url(
+        visual, seed=seed if seed is not None else context.store_id * 101
     )
-    db.add(campaign)
+    # The generator draws the picture; Pillow draws the words. Never raises -
+    # on any failure this hands back the plain background unchanged.
+    campaign.image_url = compose_poster(
+        background,
+        store_name=context.store_name,
+        occasion=campaign.occasion,
+        offer_text=campaign.offer_text,
+        address=context.address,
+        key=f"store{context.store_id}-campaign{campaign.id}",
+    )
     db.flush()
     return campaign, source
 

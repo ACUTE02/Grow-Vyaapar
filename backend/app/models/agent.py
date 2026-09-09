@@ -70,6 +70,10 @@ class Campaign(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), nullable=False, index=True)
     occasion: Mapped[str] = mapped_column(String(96), nullable=False)
+    # The promo the shopkeeper typed, printed onto the poster itself rather
+    # than only mentioned in the caption. Stored so Regenerate can redraw the
+    # same deal, and so the history list can show it without opening the image.
+    offer_text: Mapped[str | None] = mapped_column(String(140))
     prompt: Mapped[str | None] = mapped_column(Text)
     caption: Mapped[str | None] = mapped_column(Text)
     hashtags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)

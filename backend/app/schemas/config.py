@@ -46,6 +46,7 @@ class StoreContextOut(BaseModel):
     store_id: int
     store_name: str
     city: str
+    address: str | None = None
     language: str
     gstin: str | None = None
     google_review_url: str | None = None
@@ -63,6 +64,18 @@ class StoreContextOut(BaseModel):
 class StoreConfigIn(BaseModel):
     key: str = Field(min_length=1, max_length=64)
     value: Any
+
+
+class StoreDetailsIn(BaseModel):
+    """Store identity, as opposed to the vertical configuration next door.
+
+    An address is not a threshold the agent reads, so it belongs on the store
+    row rather than in store_config - and it needs its own way in.
+    """
+
+    address: str | None = Field(default=None, max_length=256)
+    whatsapp_number: str | None = Field(default=None, max_length=20)
+    google_review_url: str | None = Field(default=None, max_length=512)
 
 
 class ReminderRuleOut(BaseModel):
