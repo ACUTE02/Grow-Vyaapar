@@ -73,6 +73,14 @@ vertical. Batches with first-expired-first-out picking and near-expiry alerts
 where the trade needs them. A jobs board for alterations, lens fittings and cake
 orders. Suppliers, purchase orders and receiving stock.
 
+### Campaign posters
+A shopkeeper picks an occasion and types an offer; the poster shown to the
+customer actually says it. A generated background image (Pollinations) and the
+offer text, occasion, store name and address are composited on top with Pillow,
+so the words are always legible rather than left to a diffusion model to render.
+Regenerate before publishing, Unpublish to make a change, download the result as
+an image to send yourself - nothing here posts anywhere automatically.
+
 ### The agent
 | Agent | Decides |
 |---|---|
@@ -88,8 +96,12 @@ orders. Suppliers, purchase orders and receiving stock.
 - **Churn** - logistic regression per store, self-labelled from history, seeded
   and reproducible, with the metrics and coefficients in `model_runs` and an
   honest [model card](docs/model-card-churn.md).
-- **Stock velocity** - a day-of-week weighted moving average. Called that,
-  rather than dressed up as a time-series model.
+- **Stock forecast** - a random forest trained per store, but only served where
+  it actually beats a predict-the-mean baseline on held-out data; where it
+  doesn't (measured, not assumed), the reorder table falls back to a moving
+  average and says so on screen instead of showing a badge the evidence
+  doesn't support. Full numbers and limitations in the
+  [model card](docs/model-card-stock-forecast.md).
 
 ### The guard rails
 Consent per customer, a hard daily send cap, a rate limit, roles enforced in the
@@ -114,7 +126,7 @@ with before/after values on the ones that matter.
 | It runs on Postgres too | `TEST_DATABASE_URL=postgresql+psycopg://... pytest` |
 
 ```bash
-cd backend && pytest -q          # 230 tests
+cd backend && pytest -q          # 314 tests
 ```
 
 ---
@@ -191,6 +203,8 @@ python -m scripts.make_diagrams   # redraw the architecture and flow diagrams
 | [docs/DEMO.md](docs/DEMO.md) | the click path, the accounts, a recording shot list |
 | [docs/architecture.md](docs/architecture.md) | the six extension points, layer rules, agent boundaries |
 | [docs/model-card-churn.md](docs/model-card-churn.md) | features, labels, metrics, coefficients, limitations |
+| [docs/model-card-stock-forecast.md](docs/model-card-stock-forecast.md) | the reorder model, its baseline, and why it's switched off for one store |
+| [docs/campaign-offer-poster-plan.md](docs/campaign-offer-poster-plan.md) | how offer text gets composited onto the generated poster |
 | [docs/performance.md](docs/performance.md) | measured query times, the index before/after, N+1 guards |
 | [docs/deployment.md](docs/deployment.md) | Postgres, Docker, Render, backups, what is verified |
 | [docs/api-guide.md](docs/api-guide.md) | what each of the eleven routers is for |
@@ -243,6 +257,18 @@ The seed is deterministic (`random.seed(42)`): running it twice produces
 identical data, so a figure quoted in a report is the figure a reviewer sees.
 
 ---
+
+## Known gaps, honestly
+
+- **Settings**: store address and WhatsApp number are editable from the UI
+  (`PATCH /config/stores/{store_id}`); name, city, GSTIN and language are
+  still read-only - no write endpoint accepts changes to them yet.
+- **Training the ML models is API-only.** Churn and stock-forecast are
+  triggered from `/docs`, not from a button in the app - see
+  [docs/feature-checklist.md](docs/feature-checklist.md) for the exact calls.
+- **Devanagari offer text** renders as empty boxes on a poster until a Noto
+  Sans Devanagari `.ttf` is dropped into `backend/assets/fonts/` - the code
+  already looks there first, nothing else to change.
 
 ## Not built, on purpose
 
