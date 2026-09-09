@@ -24,6 +24,20 @@ os.environ["ML_MODEL_DIR"] = tempfile.mkdtemp(prefix="localai-test-models-")
 os.environ["DELIVERY_ADAPTER"] = "console"
 os.environ["GROQ_API_KEY"] = ""
 os.environ["GEMINI_API_KEY"] = ""
+# The developer's own backend/.env holds live WhatsApp credentials, and
+# pydantic-settings reads it whatever the test does. Blanked here so a test
+# that reaches a real adapter refuses for want of credentials instead of
+# messaging somebody's phone. The suite's own Twilio tests set fake values on
+# the settings object, which is unaffected by this.
+for _credential in (
+    "TWILIO_ACCOUNT_SID",
+    "TWILIO_AUTH_TOKEN",
+    "TWILIO_WHATSAPP_FROM",
+    "TWILIO_CONTENT_SID",
+    "WHATSAPP_TOKEN",
+    "WHATSAPP_PHONE_NUMBER_ID",
+):
+    os.environ[_credential] = ""
 
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
@@ -197,3 +211,28 @@ def rules(db):
     seed_rules_and_templates(db)
     db.commit()
     return db
+
+
+@pytest.fixture(autouse=True)
+def _no_outbound_http(monkeypatch):
+    """No test may reach a real provider, whatever it forgets to mock.
+
+    Blanking the credentials above stops the adapters getting far enough to
+    try. This is the second lock, for the case where a test sets fake
+    credentials on the settings object and then forgets to stub the HTTP call:
+    the request fails loudly here instead of arriving at Twilio, which is the
+    one mistake in this suite that costs money and messages a real person.
+
+    Tests that need a fake response replace httpx.post themselves; their
+    monkeypatch is applied after this one and wins for the duration.
+    """
+    import httpx
+
+    def _refuse(url, *args, **kwargs):
+        raise AssertionError(
+            f"a test tried to make a real HTTP request to {url}. "
+            "Stub the provider call instead - the suite must never reach the network."
+        )
+
+    monkeypatch.setattr(httpx, "post", _refuse)
+    monkeypatch.setattr(httpx, "get", _refuse)

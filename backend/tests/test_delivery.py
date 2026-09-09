@@ -636,3 +636,153 @@ def test_a_single_send_reports_why_it_failed(client, db, rules) -> None:
     body = response.json()
     assert body["status"] == "failed"
     assert body["provider_response"] == "customer has opted out of marketing messages"
+
+
+# -- the suite must be incapable of messaging a real person -------------------
+def test_the_test_environment_carries_no_real_whatsapp_credentials() -> None:
+    """backend/.env holds live Twilio credentials, and pydantic-settings reads
+    it during tests too. If they survived into the suite, the only thing
+    standing between `pytest` and a real WhatsApp message would be every
+    Twilio test remembering to stub httpx - which is a convention, not a
+    guarantee."""
+    assert not settings.twilio_account_sid
+    assert not settings.twilio_auth_token
+    assert not settings.twilio_content_sid
+    assert not settings.whatsapp_token
+
+
+def test_the_twilio_adapter_refuses_outright_under_test(outbox) -> None:
+    db, store, _context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    result = twilio_wa.TwilioWhatsAppAdapter().send(reminder, db)
+
+    assert result.status == "failed"
+    assert "credentials" in (result.detail or "").lower()
+
+
+def test_an_unstubbed_http_call_fails_loudly_rather_than_leaving_the_machine() -> None:
+    """The second lock: even with credentials set on the settings object, a
+    test that forgets to stub the provider call cannot reach the network."""
+    import httpx
+
+    with pytest.raises(AssertionError, match="never reach the network"):
+        httpx.post("https://api.twilio.com/anything", data={})
+
+
+# -- template variables (§7): the mapping is configuration, never a guess -----
+def _twilio_spy(monkeypatch, status_code=201, payload=None):
+    """Stand in for Twilio and keep the form fields it was posted."""
+    sent = {}
+
+    def spy(url, data=None, **kwargs):
+        sent.update(data or {})
+        return httpx.Response(
+            status_code,
+            json=payload if payload is not None else {"sid": "SMtest"},
+            request=httpx.Request("POST", "https://api.twilio.com"),
+        )
+
+    monkeypatch.setattr(httpx, "post", spy)
+    return sent
+
+
+def _configure_twilio(monkeypatch, *, content_sid="HXtest", variables=None):
+    monkeypatch.setattr(settings, "twilio_account_sid", "ACtest")
+    monkeypatch.setattr(settings, "twilio_auth_token", "test-token")
+    monkeypatch.setattr(settings, "twilio_whatsapp_from", "+15005550006")
+    monkeypatch.setattr(settings, "twilio_content_sid", content_sid)
+    monkeypatch.setattr(settings, "twilio_content_variables", variables)
+
+
+def test_a_template_with_no_configured_variables_sends_none(outbox, monkeypatch) -> None:
+    db, store, _context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    _configure_twilio(monkeypatch, variables=None)
+    sent = _twilio_spy(monkeypatch)
+
+    result = twilio_wa.TwilioWhatsAppAdapter().send(reminder, db)
+
+    assert result.status == "sent"
+    assert sent["ContentSid"] == "HXtest"
+    assert "ContentVariables" not in sent
+
+
+def test_configured_variables_are_filled_from_real_data(outbox, monkeypatch) -> None:
+    """The numbers are Meta's; what each one means is the shopkeeper's to
+    declare. Nothing here assumes a template shape."""
+    import json
+
+    db, store, _context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    _configure_twilio(
+        monkeypatch,
+        variables='{"1": "customer_name", "2": "store_name", "3": "store_city"}',
+    )
+    sent = _twilio_spy(monkeypatch)
+
+    result = twilio_wa.TwilioWhatsAppAdapter().send(reminder, db)
+
+    assert result.status == "sent"
+    variables = json.loads(sent["ContentVariables"])
+    customer = db.get(Customer, reminder.customer_id)
+    assert variables["1"] == customer.name
+    assert variables["2"] == store.name
+    assert variables["3"] == store.city
+
+
+def test_a_broken_variable_mapping_still_sends_the_template(outbox, monkeypatch) -> None:
+    """A typo in an env var must not silently stop a shop's reminders."""
+    db, store, _context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    _configure_twilio(monkeypatch, variables="{not json at all")
+    sent = _twilio_spy(monkeypatch)
+
+    result = twilio_wa.TwilioWhatsAppAdapter().send(reminder, db)
+
+    assert result.status == "sent"
+    assert sent["ContentSid"] == "HXtest"
+    assert "ContentVariables" not in sent
+
+
+def test_an_unknown_field_name_becomes_empty_rather_than_an_error(outbox, monkeypatch) -> None:
+    import json
+
+    db, store, _context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    _configure_twilio(monkeypatch, variables='{"1": "customer_name", "2": "nonsense_field"}')
+    sent = _twilio_spy(monkeypatch)
+
+    result = twilio_wa.TwilioWhatsAppAdapter().send(reminder, db)
+
+    assert result.status == "sent"
+    assert json.loads(sent["ContentVariables"])["2"] == ""
+
+
+def test_a_template_send_says_the_drafted_text_did_not_go_out(outbox, monkeypatch) -> None:
+    """WhatsApp fixes a template's wording at approval, so reminder.message is
+    not what the customer received. The Outbox shows that message beside the
+    word "Sent", so the provider response has to say otherwise."""
+    db, store, _context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    _configure_twilio(monkeypatch)
+    _twilio_spy(monkeypatch)
+
+    result = twilio_wa.TwilioWhatsAppAdapter().send(reminder, db)
+
+    assert result.status == "sent"
+    assert "approved template HXtest" in result.detail
+    assert "not the drafted text" in result.detail
+
+
+def test_the_recipient_and_sender_are_both_whatsapp_prefixed_once(outbox, monkeypatch) -> None:
+    db, store, _context = outbox
+    reminder = db.scalar(select(Reminder).where(Reminder.store_id == store.id))
+    _configure_twilio(monkeypatch)
+    monkeypatch.setattr(settings, "twilio_whatsapp_from", "whatsapp:+15005550006")
+    sent = _twilio_spy(monkeypatch)
+
+    twilio_wa.TwilioWhatsAppAdapter().send(reminder, db)
+
+    assert sent["From"] == "whatsapp:+15005550006"
+    assert sent["To"].startswith("whatsapp:+")
+    assert sent["To"].count("whatsapp:") == 1

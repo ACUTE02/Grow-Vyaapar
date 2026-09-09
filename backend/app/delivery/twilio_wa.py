@@ -5,6 +5,7 @@ than pretending to have sent anything.
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -13,6 +14,7 @@ from sqlalchemy import select
 
 from app.delivery.base import Adapter, DeliveryResult
 from app.models.agent import Reminder
+from app.models.config import Store
 from app.models.core import Customer
 from app.settings import settings
 
@@ -22,6 +24,65 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 TWILIO_URL = "https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
+
+# What TWILIO_CONTENT_VARIABLES may map a template placeholder to. Deliberately
+# short: every entry is something the reminder already knows, so a template can
+# be filled without inventing data to fill it with.
+TEMPLATE_FIELDS = (
+    "customer_name",
+    "store_name",
+    "store_city",
+    "store_address",
+    "review_url",
+    "message",
+)
+
+
+def _template_values(reminder: Reminder, customer: Customer | None, store: Store | None) -> dict:
+    """The value behind each name in TEMPLATE_FIELDS, for this one reminder."""
+    return {
+        "customer_name": (customer.name if customer else "") or "",
+        "store_name": (store.name if store else "") or "",
+        "store_city": (store.city if store else "") or "",
+        "store_address": (getattr(store, "address", None) or "") if store else "",
+        "review_url": (store.google_review_url if store else "") or "",
+        "message": reminder.message or "",
+    }
+
+
+def content_variables(reminder: Reminder, customer: Customer | None, store: Store | None) -> str | None:
+    """Twilio's ContentVariables for the configured template, as a JSON string.
+
+    Meta numbers a template's placeholders ({{1}}, {{2}}) and says nothing
+    about what they mean, so the mapping is configuration - the person who had
+    the template approved is the only one who knows. Unset, or unparseable,
+    means send none: a template with no placeholders needs none, and a bad
+    mapping must not stop the message going out with an obscure Twilio error.
+    """
+    raw = settings.twilio_content_variables
+    if not raw or not raw.strip():
+        return None
+    try:
+        mapping = json.loads(raw)
+    except ValueError:
+        logger.error(
+            "TWILIO_CONTENT_VARIABLES is not valid JSON; sending the template with no variables"
+        )
+        return None
+    if not isinstance(mapping, dict) or not mapping:
+        return None
+
+    values = _template_values(reminder, customer, store)
+    unknown = sorted(str(field) for field in mapping.values() if field not in values)
+    if unknown:
+        logger.error(
+            "TWILIO_CONTENT_VARIABLES names unknown field(s) %s; known fields are %s",
+            ", ".join(unknown),
+            ", ".join(TEMPLATE_FIELDS),
+        )
+    return json.dumps(
+        {str(key): values.get(str(field), "") for key, field in mapping.items()}
+    )
 
 
 class TwilioWhatsAppAdapter(Adapter):
@@ -52,6 +113,8 @@ class TwilioWhatsAppAdapter(Adapter):
         # the two prefixes never stack into "whatsapp:whatsapp:+1...".
         from_number = settings.twilio_whatsapp_from.removeprefix("whatsapp:")
 
+        store = db.get(Store, reminder.store_id)
+
         data = {"From": f"whatsapp:{from_number}", "To": f"whatsapp:{to_number}"}
         if settings.twilio_content_sid:
             # No active 24-hour session can be assumed for a reminder the
@@ -62,6 +125,9 @@ class TwilioWhatsAppAdapter(Adapter):
             # reminder.message; that is a WhatsApp platform rule, not a
             # choice made here.
             data["ContentSid"] = settings.twilio_content_sid
+            variables = content_variables(reminder, customer, store)
+            if variables:
+                data["ContentVariables"] = variables
         else:
             data["Body"] = reminder.message
 
@@ -92,4 +158,15 @@ class TwilioWhatsAppAdapter(Adapter):
             )
             return DeliveryResult("failed", detail[:500])
 
-        return DeliveryResult("sent", f"twilio sid {response.json().get('sid', '')}")
+        sid = response.json().get("sid", "")
+        if settings.twilio_content_sid:
+            # Say which template went out, because it is not the text the
+            # Outbox is showing: WhatsApp fixes a template's wording at
+            # approval time, so reminder.message never leaves the building on
+            # this path. A shopkeeper reading "Sent" deserves to know that.
+            return DeliveryResult(
+                "sent",
+                f"twilio sid {sid} (approved template {settings.twilio_content_sid}, "
+                "not the drafted text)",
+            )
+        return DeliveryResult("sent", f"twilio sid {sid}")

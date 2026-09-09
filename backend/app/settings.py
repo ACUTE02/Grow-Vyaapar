@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     # customer didn't start), Twilio requires an approved Content Template,
     # referenced by this id, instead. Optional: unset keeps sending Body.
     twilio_content_sid: str | None = None
+    # An approved template's placeholders are numbered by Meta ({{1}}, {{2}}),
+    # and only the person who wrote the template knows what each one means. So
+    # the mapping is configuration, not code: a JSON object from placeholder
+    # number to one of the field names in delivery/twilio_wa.py's
+    # TEMPLATE_FIELDS - for example {"1": "customer_name", "2": "store_name"}.
+    # Unset means the template takes no variables, which is the default and
+    # the behaviour before this existed.
+    twilio_content_variables: str | None = None
 
     # Meta WhatsApp Cloud API
     whatsapp_token: str | None = None
