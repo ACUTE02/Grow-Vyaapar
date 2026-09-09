@@ -67,7 +67,11 @@ export function Pagination({
           : `Showing ${count(first)}–${count(Math.min(lastOnPage, total))} of ${count(total)} ${noun}`}
       </p>
 
-      <div className="flex items-center gap-3">
+      {/* Both rows wrap. Only the outer nav did, so on a 375px screen the page
+          buttons ran off the right edge - and because nothing scrolls
+          sideways, "Next" was not merely awkward to reach, it was unreachable.
+          A phone is the likeliest screen a shopkeeper has. */}
+      <div className="flex flex-wrap items-center justify-end gap-3">
         {onPageSizeChange ? (
           <label className="flex items-center gap-1.5 text-xs text-ink-2">
             <span className="hidden sm:inline">Per page</span>
@@ -85,7 +89,7 @@ export function Pagination({
           </label>
         ) : null}
 
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center justify-end gap-1">
           <PageButton
             label="Previous page"
             disabled={page <= 1}

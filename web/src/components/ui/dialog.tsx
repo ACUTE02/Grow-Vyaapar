@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { Button } from "./button";
 
 /**
@@ -24,6 +24,11 @@ export function Modal({
   footer?: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  // Generated, not the literal "modal-title" this used to hard-code: two
+  // modals on one page produced two elements with the same id, and
+  // aria-labelledby then resolved to whichever came first in the document.
+  const titleId = useId();
+  const descriptionId = useId();
 
   useEffect(() => {
     const dialog = ref.current;
@@ -43,14 +48,19 @@ export function Modal({
       onClick={(event) => {
         if (event.target === ref.current) onClose();
       }}
-      aria-labelledby="modal-title"
-      className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-card border border-line bg-surface p-0 text-ink shadow-pop backdrop:bg-black/40"
+      aria-labelledby={titleId}
+      aria-describedby={description ? descriptionId : undefined}
+      className="m-auto w-[min(32rem,calc(100vw-2rem))] overscroll-contain rounded-card border border-line bg-surface p-0 text-ink shadow-pop backdrop:bg-black/40"
     >
       <div className="border-b border-line px-5 py-4">
-        <h2 id="modal-title" className="font-display text-base font-semibold text-ink">
+        <h2 id={titleId} className="font-display text-base font-semibold text-ink">
           {title}
         </h2>
-        {description ? <p className="mt-1 text-sm text-ink-2">{description}</p> : null}
+        {description ? (
+          <p id={descriptionId} className="mt-1 text-sm text-ink-2">
+            {description}
+          </p>
+        ) : null}
       </div>
       {children ? <div className="px-5 py-4">{children}</div> : null}
       {footer ? (

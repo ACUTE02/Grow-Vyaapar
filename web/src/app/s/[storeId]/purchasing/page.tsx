@@ -296,9 +296,12 @@ export default function PurchasingPage({ params }: { params: Promise<{ storeId: 
               )}
 
               <Card.Body className="border-t border-line">
-                <h3 className="mb-3 font-display text-sm font-semibold text-ink">
+                {/* h2, not h3: the only heading above this on the page is the
+                    h1 in the page header, and a screen reader's heading list
+                    should not have a gap in it. */}
+                <h2 className="mb-3 font-display text-sm font-semibold text-ink">
                   Raise an order
-                </h3>
+                </h2>
                 {products.isPending ? (
                   <SkeletonRows rows={3} columns={3} />
                 ) : (

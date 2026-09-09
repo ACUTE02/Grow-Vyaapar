@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pencil, X } from "lucide-react";
 import { Button, IconButton } from "@/components/ui/button";
 import { Toggle } from "@/components/ui/field";
@@ -17,6 +17,13 @@ import { formatDate, formatDateTime, money, count } from "@/lib/format";
  * A side sheet rather than a route, because the list is the context - a
  * shopkeeper looking someone up wants to glance and go back, not lose their
  * page and their search.
+ *
+ * Built on <dialog> for the same reason the modal is. It previously said
+ * role="dialog" aria-modal="true" on an <aside>, which is a claim rather than
+ * a behaviour: Escape did nothing, Tab walked straight out into the page
+ * behind, and focus never entered the panel or came back afterwards. The
+ * platform gives all four - focus trap, Escape, top layer, inert background -
+ * and cannot be subtly wrong about them.
  */
 export function CustomerPanel({
   storeId,
@@ -35,20 +42,37 @@ export function CustomerPanel({
   const loyalty = useLoyalty(storeId, customerId);
   const bills = useTransactions(storeId, { customerId, limit: 5, offset: 0 });
   const update = useUpdateCustomer(storeId);
+  const ref = useRef<HTMLDialogElement>(null);
 
-  if (customerId === null) return null;
+  const open = customerId !== null;
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    // showModal is what puts it in the top layer, traps focus and makes the
+    // page behind inert. Rendering it open with an attribute would not.
+    if (open && !dialog.open) dialog.showModal();
+    if (!open && dialog.open) dialog.close();
+  }, [open]);
 
   const record = customer.data;
 
   return (
-    <>
-      <div className="fixed inset-0 z-30 bg-black/30" onClick={onClose} aria-hidden />
-      <aside
-        role="dialog"
-        aria-modal="true"
-        aria-label="Customer details"
-        className="fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col overflow-y-auto border-l border-line bg-surface shadow-pop"
-      >
+    <dialog
+      ref={ref}
+      aria-label="Customer details"
+      // Escape and a click on the backdrop both mean cancel, and the parent
+      // owns the open state, so neither is allowed to close the element
+      // behind its back.
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onClick={(event) => {
+        if (event.target === ref.current) onClose();
+      }}
+      className="fixed inset-y-0 right-0 left-auto m-0 h-full max-h-full w-full max-w-md overscroll-contain border-l border-line bg-surface p-0 text-ink shadow-pop backdrop:bg-black/30"
+    >
+      <div className="flex h-full flex-col overflow-y-auto">
         <header className="sticky top-0 z-10 flex items-start gap-3 border-b border-line bg-surface px-5 py-4">
           <div className="min-w-0 flex-1">
             {customer.isPending ? (
@@ -213,8 +237,8 @@ export function CustomerPanel({
             </>
           )}
         </div>
-      </aside>
-    </>
+      </div>
+    </dialog>
   );
 }
 
