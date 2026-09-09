@@ -29,6 +29,19 @@ REFERRAL_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"   # no look-alike charact
 # accounts and the ledger
 # --------------------------------------------------------------------------- #
 def account_for(db: Session, context: StoreContext, customer_id: int) -> LoyaltyAccount:
+    """The customer's points account at this store, opened on first use.
+
+    The customer is checked before the account is opened, because the lookup
+    below only scopes the *query* by store: asked for a customer belonging to
+    somebody else, it found nothing and cheerfully created an account linking
+    this store to that customer, then answered with it. That made
+    GET /loyalty/customers/{id} a cross-tenant read - and a cross-tenant write
+    on a GET - for any customer id worth guessing.
+    """
+    customer = db.get(Customer, customer_id)
+    if customer is None or customer.store_id != context.store_id:
+        raise NotFoundError(f"Customer {customer_id} is not registered at {context.store_name}")
+
     account = db.scalar(
         select(LoyaltyAccount).where(
             LoyaltyAccount.store_id == context.store_id,
