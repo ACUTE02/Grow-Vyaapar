@@ -1,5 +1,0 @@
-# Streamlit Community Cloud installs from this file. The front end talks to the
-# API over HTTP and needs nothing from the backend package.
-streamlit>=1.36
-pandas>=2.2
-httpx>=0.27

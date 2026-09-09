@@ -7,3 +7,8 @@ __pycache__/
 .streamlit/secrets.toml
 docs/.gitkeep
 backend/models/
+node_modules/
+web/.next/
+web/.env.local
+
+backend/static/campaigns/

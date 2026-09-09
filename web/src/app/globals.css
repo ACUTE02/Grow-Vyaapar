@@ -1,0 +1,228 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   LocalAI OS design tokens
+
+   The brief was explicit: not Streamlit, not a generic blue-and-white admin
+   template. The palette is built around a shopkeeper's counter rather than a
+   SaaS dashboard - a deep counter-green as the primary, marigold as the
+   accent, and warm off-white paper instead of pure #fff. Every neutral has a
+   warm cast so a screen full of tables does not read as cold grey.
+
+   Values are raw here and mapped into Tailwind's scale in @theme below, so a
+   component only ever writes bg-surface / text-muted, never a hex.
+   ========================================================================== */
+
+:root {
+  /* paper and ink */
+  --paper: #faf7f2;          /* app background */
+  --surface: #ffffff;        /* cards, tables */
+  --surface-2: #f4efe7;      /* subtle fills, table headers, hover */
+  --surface-3: #e9e2d6;      /* borders on fills */
+  --ink: #1c1917;            /* primary text */
+  --ink-2: #57534e;          /* secondary text */
+  /* 4.5:1 on every surface it is used against (#fff 5.35, paper 5.01,
+     surface-2 4.68). The lighter #8a827a it replaced measured 3.78 and
+     failed WCAG 1.4.3 for the 11-14px text it carries. */
+  --ink-3: #706a61;          /* tertiary / placeholder */
+  --line: #e5ded2;           /* borders */
+  --line-strong: #d3c9b8;
+
+  /* brand */
+  --primary: #0f5d4a;
+  --primary-hover: #0b4a3b;
+  --primary-soft: #e3f0eb;
+  --primary-ink: #ffffff;
+
+  --accent: #d97528;         /* marigold: highlights, the active store */
+  --accent-soft: #fdf0e3;
+
+  /* status */
+  --success: #157347;
+  --success-soft: #e4f2ea;
+  --warning: #a86008;
+  --warning-soft: #fdf1df;
+  --danger: #b3261e;
+  --danger-soft: #fbe9e7;
+  --info: #1e5f8f;
+  --info-soft: #e6f0f7;
+
+  --focus: #0f5d4a;
+
+  /* Chart categorical ramp, in fixed order - series 1 is always this green,
+     whatever is filtered out. Validated with the dataviz validator against the
+     white card surface: lightness band, chroma floor, CVD separation (worst
+     adjacent pair ΔE 9.5 protan), normal-vision floor and 3:1 contrast all
+     pass. Do not re-step one of these by eye. */
+  --chart-1: #149174;
+  --chart-2: #c96f0a;
+  --chart-3: #2f6bbf;
+  --chart-4: #c23a86;
+  --chart-grid: #e5ded2;
+  --chart-axis: #8a827a;
+
+  --radius: 0.625rem;
+  --shadow-card: 0 1px 2px rgb(28 25 23 / 0.06), 0 1px 3px rgb(28 25 23 / 0.04);
+  --shadow-pop: 0 8px 24px rgb(28 25 23 / 0.12), 0 2px 6px rgb(28 25 23 / 0.08);
+}
+
+/* The dark theme keeps the warmth: browns rather than blue-blacks, and the
+   green lightens so it still passes contrast on a dark surface. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #16130f;
+    --surface: #1f1b16;
+    --surface-2: #292319;
+    --surface-3: #362e22;
+    --ink: #f5f0e8;
+    --ink-2: #c2b8a8;
+    /* 5.81 / 6.29 / 5.29 against surface, paper and surface-2. */
+    --ink-3: #a09585;
+    --line: #322b21;
+    --line-strong: #453c2e;
+
+    --primary: #4bbf9c;
+    --primary-hover: #64d3b0;
+    --primary-soft: #10312a;
+    --primary-ink: #07271f;
+
+    --accent: #f0964b;
+    --accent-soft: #33210f;
+
+    --success: #58c58b;
+    --success-soft: #122c1f;
+    --warning: #e2a44a;
+    --warning-soft: #2f2410;
+    --danger: #f0857c;
+    --danger-soft: #331716;
+    --info: #6cb2e0;
+    --info-soft: #12242f;
+
+    --focus: #4bbf9c;
+
+    /* Dark is chosen, not flipped: its own steps from the same hues, validated
+       separately against the dark card surface (#1f1b16). The light steps
+       would be too dark here and the naive lightening too washed out. */
+    --chart-1: #22a888;
+    --chart-2: #c47d18;
+    --chart-3: #4a8fd8;
+    --chart-4: #d961a0;
+    --chart-grid: #322b21;
+    --chart-axis: #928878;
+
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 1px 3px rgb(0 0 0 / 0.3);
+    --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.4);
+  }
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-ink: var(--primary-ink);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+
+  --font-sans: var(--font-ui), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-display), var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo, monospace;
+
+  --radius-card: var(--radius);
+  --shadow-card: var(--shadow-card);
+  --shadow-pop: var(--shadow-pop);
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Money and quantities line up in columns only with tabular figures. Applied
+   by the <Money> and numeric table cells, not globally - tabular digits are
+   worse in prose. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* One focus treatment for the whole app, visible on every surface including
+   the primary green. :focus-visible so a mouse click does not draw it. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Respect a reduced-motion preference everywhere rather than per component. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.skeleton::after {
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    rgb(255 255 255 / 0.35),
+    transparent
+  );
+  animation: shimmer 1.6s infinite;
+  content: "";
+}
+
+@media (prefers-color-scheme: dark) {
+  .skeleton::after {
+    background-image: linear-gradient(
+      90deg,
+      transparent,
+      rgb(255 255 255 / 0.06),
+      transparent
+    );
+  }
+}

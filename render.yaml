@@ -24,6 +24,10 @@ services:
         value: "true"
       - key: JWT_SECRET               # generate once: secrets.token_urlsafe(48)
         generateValue: true
+      - key: COOKIE_SECURE            # https only: the cookie holds a token
+        value: "true"
+      - key: CORS_ORIGINS             # set to the deployed front end's origin
+        sync: false
       - key: JSON_LOGS
         value: "true"
       - key: LLM_PROVIDER_ORDER

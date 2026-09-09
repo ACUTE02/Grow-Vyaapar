@@ -38,16 +38,26 @@ python -m scripts.seed
 uvicorn app.main:app --reload
 ```
 
-In a second terminal:
+In a second terminal, the web app (Next.js):
 
 ```bash
-cd frontend
-streamlit run app.py
+cd web
+npm install
+npm run dev
 ```
 
-API on <http://127.0.0.1:8000> (`/docs`), app on <http://localhost:8501>.
+API on <http://127.0.0.1:8000> (`/docs`), app on <http://localhost:3000>.
 Sign in as **`owner@localai.demo`** with password **`localai123`**.
 No LLM key is needed for any of it.
+
+Or start both at once:
+
+```bash
+.venv\Scripts\python.exe dev.py
+```
+
+The Streamlit front end this project began with has been retired. Every page it
+had, including the jobs board, expiry and purchasing, now lives in `web/`.
 
 Full click path: **[docs/DEMO.md](docs/DEMO.md)**.
 
@@ -184,6 +194,8 @@ python -m scripts.make_diagrams   # redraw the architecture and flow diagrams
 | [docs/performance.md](docs/performance.md) | measured query times, the index before/after, N+1 guards |
 | [docs/deployment.md](docs/deployment.md) | Postgres, Docker, Render, backups, what is verified |
 | [docs/api-guide.md](docs/api-guide.md) | what each of the eleven routers is for |
+| [docs/frontend-architecture.md](docs/frontend-architecture.md) | why Streamlit was replaced, and how the Next.js app is built |
+| [docs/postgres-migration.md](docs/postgres-migration.md) | runbook for moving off SQLite, with rollback |
 | `/docs` on a running API | the generated reference |
 
 ![Data model](docs/er-diagram.png)
@@ -204,7 +216,11 @@ backend/app/delivery/    console (default), Twilio sandbox, WhatsApp Cloud
 backend/app/security.py  bcrypt + JWT       app/middleware.py  roles and audit
 backend/scripts/         seed, rehearse, benchmark, backup, diagrams
 backend/scheduler.py     the nightly pass
-frontend/                Streamlit app, one file per page
+backend/app/ratelimit.py in-process throttle for sign-in
+web/src/app/             Next.js routes; every page lives under /s/[storeId]
+web/src/lib/             api client, Zod schemas, query hooks, session, format
+web/src/components/      shell, ui primitives, charts, feature components
+dev.py                   starts the backend and the web app together
 ```
 
 ---
