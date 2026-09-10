@@ -23,7 +23,18 @@ from app.settings import settings
 
 logger = logging.getLogger(__name__)
 
-RETRYABLE_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
+# Worth trying again: a blip, a timeout, a server that fell over. Sending the
+# same request a second later is a reasonable thing to do about any of these.
+RETRYABLE_STATUS = {408, 409, 425, 500, 502, 503, 504}
+
+# Not worth trying again, and actively harmful. On Gemini's free tier a
+# rejected request still counts against the allowance and pushes the window
+# out: measured here, one 429 said "retry in 45s", and each further attempt
+# moved that to a full 60s. So the usual three attempts do not ride out a
+# throttle - they deepen it, turning a 15-second wait into a self-sustaining
+# one and burning three slots per call instead of one. Falling back at once is
+# both kinder to the quota and faster for the request that is waiting.
+THROTTLED_STATUS = {429}
 
 # Gemini's flash models are reasoning models: they spend part of
 # maxOutputTokens on an internal "thinking" pass before writing a single word
@@ -234,11 +245,23 @@ def available() -> bool:
     return bool(configured_providers())
 
 
-def _is_rate_limited(exc: Exception) -> bool:
+def _is_throttled(exc: Exception) -> bool:
+    """A quota or rate-limit refusal, which retrying only makes worse."""
     if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code in RETRYABLE_STATUS
+        return exc.response.status_code in THROTTLED_STATUS
     text = str(exc).lower()
     return "429" in text or "quota" in text or "rate limit" in text or "resource_exhausted" in text
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """A transient failure worth one more attempt - never a throttle."""
+    if _is_throttled(exc):
+        return False
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in RETRYABLE_STATUS
+    # A timeout or a dropped connection never reached the model, so it cost
+    # nothing and is safe to repeat.
+    return isinstance(exc, (httpx.TimeoutException, httpx.TransportError))
 
 
 # --------------------------------------------------------------------------- #
@@ -275,15 +298,17 @@ def call(
             try:
                 text = provider(prompt, max_tokens, timeout)
             except Exception as exc:
-                retryable = _is_rate_limited(exc)
+                throttled = _is_throttled(exc)
                 logger.warning(
                     "LLM %s attempt %s failed (%s): %s",
                     provider_name,
                     attempt + 1,
-                    "throttled" if retryable else "error",
+                    "throttled" if throttled else "error",
                     exc,
                 )
-                if retryable and attempt < retries:
+                # A throttle is answered by giving up on this provider at once,
+                # not by trying harder - see THROTTLED_STATUS above.
+                if not throttled and _is_retryable(exc) and attempt < retries:
                     time.sleep(min(2**attempt, 8))     # exponential backoff
                     continue
                 break                                   # fall through to next provider

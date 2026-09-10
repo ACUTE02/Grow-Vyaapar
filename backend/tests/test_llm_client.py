@@ -71,7 +71,10 @@ def test_a_429_falls_through_to_the_next_provider(monkeypatch) -> None:
     monkeypatch.setitem(llm.PROVIDERS, "groq", works)
 
     assert llm.call("hello", use_cache=False) == "second provider answered"
-    assert calls == ["gemini", "gemini", "groq"], "one retry, then the next provider"
+    # Straight to the next provider, with no retry in between: a 429 spends the
+    # allowance even when it is refused, so a second attempt would push the
+    # first provider's reset further out and delay this request for nothing.
+    assert calls == ["gemini", "groq"], "no retry on a throttle, next provider at once"
 
 
 def test_a_429_everywhere_returns_none_not_an_exception(monkeypatch) -> None:
@@ -88,10 +91,58 @@ def test_a_429_everywhere_returns_none_not_an_exception(monkeypatch) -> None:
     assert llm.call("hello", use_cache=False) is None
 
 
-def test_quota_text_without_a_status_code_is_still_retryable() -> None:
-    assert llm._is_rate_limited(RuntimeError("RESOURCE_EXHAUSTED: quota"))
-    assert llm._is_rate_limited(_http_error(503))
-    assert not llm._is_rate_limited(ValueError("bad json"))
+def test_quota_text_without_a_status_code_is_recognised_as_a_throttle() -> None:
+    """Not every provider says 429 in a status code; some only say it in prose."""
+    assert llm._is_throttled(RuntimeError("RESOURCE_EXHAUSTED: quota"))
+    assert llm._is_throttled(_http_error(429))
+    assert not llm._is_throttled(_http_error(503))
+    assert not llm._is_throttled(ValueError("bad json"))
+
+
+def test_a_throttle_is_never_retried_but_a_server_error_is() -> None:
+    """Retrying a 429 deepens the throttle; retrying a 503 is just a retry.
+
+    On Gemini's free tier a rejected request still spends the allowance and
+    pushes the reset out, so three attempts turn a 15-second wait into a
+    self-sustaining one. Transient failures cost nothing and stay retryable.
+    """
+    assert not llm._is_retryable(_http_error(429))
+    assert not llm._is_retryable(RuntimeError("rate limit exceeded"))
+    assert llm._is_retryable(_http_error(503))
+    assert llm._is_retryable(httpx.ConnectTimeout("timed out"))
+    assert not llm._is_retryable(ValueError("bad json"))
+
+
+def test_a_throttled_provider_is_called_exactly_once(monkeypatch) -> None:
+    """The whole point: one attempt per provider, not one plus two retries."""
+    calls: list[str] = []
+
+    def throttled(*args, **kwargs):
+        calls.append("gemini")
+        raise _http_error(429)
+
+    monkeypatch.setattr(llm.settings, "gemini_api_key", "g-key")
+    monkeypatch.setattr(llm.settings, "groq_api_key", None)
+    monkeypatch.setitem(llm.PROVIDERS, "gemini", throttled)
+
+    assert llm.call("hello", use_cache=False, retries=2) is None
+    assert calls == ["gemini"]
+
+
+def test_a_server_error_still_gets_its_retries(monkeypatch) -> None:
+    """The retry path has to survive the change, or this is just a regression."""
+    calls: list[int] = []
+
+    def flaky(*args, **kwargs):
+        calls.append(1)
+        raise _http_error(503)
+
+    monkeypatch.setattr(llm.settings, "gemini_api_key", "g-key")
+    monkeypatch.setattr(llm.settings, "groq_api_key", None)
+    monkeypatch.setitem(llm.PROVIDERS, "gemini", flaky)
+
+    assert llm.call("hello", use_cache=False, retries=2) is None
+    assert len(calls) == 3
 
 
 # -- throttle ----------------------------------------------------------------

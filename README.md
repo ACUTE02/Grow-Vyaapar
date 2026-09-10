@@ -180,7 +180,7 @@ identical data, so a figure quoted in a report is the figure a reviewer sees.
 ## Testing
 
 ```bash
-cd backend && python -m pytest -q          # 403 tests
+cd backend && python -m pytest -q          # 406 tests
 cd web && npx tsc --noEmit && npx eslint . && npm run build
 ```
 
@@ -204,11 +204,12 @@ full results and for how test isolation is enforced.
 - **Devanagari offer text** renders as empty boxes on a poster until a Noto Sans
   Devanagari `.ttf` is dropped into `backend/assets/fonts/` — the code already
   looks there first, nothing else to change.
-- **The LLM retry backoff is shorter than the free tier's throttle window.**
-  Three attempts finish in about 3 s while a 429 asks for roughly 15, so
-  throttling always produces template copy rather than delayed model copy. That
-  is deliberate — waiting 15 s inside a user's request is worse — but a
-  background path could afford to honour the hint.
+- **A throttled LLM call produces template copy, not delayed model copy.** A 429
+  falls back immediately rather than retrying, because on a free tier a refused
+  request still spends the allowance and pushes the reset out — retrying makes
+  the throttle self-sustaining. Falling back fast is right for a request a
+  shopkeeper is waiting on, but it does mean a busy free tier yields template
+  copy more often. A background path could afford to honour the retry hint.
 
 ## Not built, on purpose
 
