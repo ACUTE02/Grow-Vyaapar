@@ -662,7 +662,7 @@ def report(db: Session) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Seed demo data for LocalAI OS")
+    parser = argparse.ArgumentParser(description="Seed demo data for Grow Vyaapar")
     parser.add_argument("--quiet", action="store_true", help="skip the summary tables")
     args = parser.parse_args()
 

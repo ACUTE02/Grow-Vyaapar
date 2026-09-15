@@ -20,7 +20,7 @@ const display = Sora({
 });
 
 export const metadata: Metadata = {
-  title: "LocalAI OS",
+  title: "Grow Vyaapar",
   description:
     "Billing, inventory, customers and an autonomous marketing agent for Indian local retail.",
 };

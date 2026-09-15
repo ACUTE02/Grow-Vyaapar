@@ -78,7 +78,7 @@ function Sidebar({
         <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-ink">
           <Store className="size-4" aria-hidden />
         </span>
-        <span className="font-display text-[15px] font-semibold tracking-tight">LocalAI OS</span>
+        <span className="font-display text-[15px] font-semibold tracking-tight">Grow Vyaapar</span>
         <button
           type="button"
           onClick={onClose}

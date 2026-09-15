@@ -86,7 +86,7 @@ def architecture() -> Path:
     draw = ImageDraw.Draw(image)
     title_font, header_font, body_font, small = font(30), font(17), font(13), font(12)
 
-    draw.text((40, 26), "LocalAI OS - system architecture", fill=INK, font=title_font)
+    draw.text((40, 26), "Grow Vyaapar - system architecture", fill=INK, font=title_font)
     draw.text(
         (40, 68),
         "One deployable. The agents are Python modules inside the same process, not services.",

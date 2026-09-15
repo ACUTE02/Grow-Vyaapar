@@ -475,7 +475,7 @@ def _readable_code(code: int | None) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Start the LocalAI OS development stack in one terminal.",
+        description="Start the Grow Vyaapar development stack in one terminal.",
     )
     parser.add_argument(
         "--no-frontend",

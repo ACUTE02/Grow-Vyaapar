@@ -84,7 +84,7 @@ def main() -> None:
     columns = _columns()
     total = len(Base.metadata.tables)
 
-    draw.text((40, 26), "LocalAI OS - data model", fill=(17, 24, 39), font=title_font)
+    draw.text((40, 26), "Grow Vyaapar - data model", fill=(17, 24, 39), font=title_font)
     draw.text(
         (40, 72),
         f"{total} tables. Every core, agent and commerce table carries store_id. "

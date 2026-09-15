@@ -78,7 +78,7 @@ def nightly_pass() -> dict[str, dict]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="LocalAI OS nightly scheduler")
+    parser = argparse.ArgumentParser(description="Grow Vyaapar nightly scheduler")
     parser.add_argument("--now", action="store_true", help="run one pass and exit")
     args = parser.parse_args()
 

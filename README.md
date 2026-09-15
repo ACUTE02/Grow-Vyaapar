@@ -1,4 +1,4 @@
-# LocalAI OS
+# Grow Vyaapar
 
 Billing, inventory and customers for small Indian retail stores, with an
 autonomous marketing agent and two machine-learning models on top.
@@ -110,7 +110,7 @@ posts anywhere automatically.
 
 | Where | What |
 |---|---|
-| **[docs/LocalAI_OS_Final_Project_Report.pdf](docs/LocalAI_OS_Final_Project_Report.pdf)** | **The full project report — 36 pages, architecture through to viva prep** |
+| **[docs/Grow_Vyaapar_Final_Project_Report.pdf](docs/Grow_Vyaapar_Final_Project_Report.pdf)** | **The full project report — 36 pages, architecture through to viva prep** |
 | [docs/demo-guide.md](docs/demo-guide.md) | a 10-minute click path, and what not to do |
 | [docs/viva-study-guide.md](docs/viva-study-guide.md) | short answers to the questions an examiner asks |
 | [docs/testing-report.md](docs/testing-report.md) | every measured figure, and the defects this pass found |

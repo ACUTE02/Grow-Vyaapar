@@ -61,7 +61,7 @@ export default function LoginPage() {
           <span className="grid size-9 place-items-center rounded-lg bg-primary-ink/15">
             <Store className="size-5" aria-hidden />
           </span>
-          <span className="font-display text-lg font-semibold tracking-tight">LocalAI OS</span>
+          <span className="font-display text-lg font-semibold tracking-tight">Grow Vyaapar</span>
         </div>
         <div className="relative max-w-md">
           <h1 className="font-display text-3xl leading-tight font-semibold text-balance">
@@ -84,7 +84,7 @@ export default function LoginPage() {
             <span className="grid size-9 place-items-center rounded-lg bg-primary text-primary-ink">
               <Store className="size-5" aria-hidden />
             </span>
-            <span className="font-display text-lg font-semibold tracking-tight">LocalAI OS</span>
+            <span className="font-display text-lg font-semibold tracking-tight">Grow Vyaapar</span>
           </div>
 
           <h2 className="font-display text-2xl font-semibold tracking-tight">Sign in</h2>

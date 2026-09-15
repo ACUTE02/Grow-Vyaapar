@@ -108,7 +108,7 @@ def prune(directory: Path, keep: int) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Back up the LocalAI OS database")
+    parser = argparse.ArgumentParser(description="Back up the Grow Vyaapar database")
     parser.add_argument("--restore", help="print the restore command for a dump file")
     args = parser.parse_args()
 
