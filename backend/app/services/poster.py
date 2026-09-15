@@ -100,6 +100,7 @@ def compose_poster(
     store_name: str,
     occasion: str,
     offer_text: str | None,
+    headline: str | None = None,
     address: str | None = None,
     key: str,
 ) -> str:
@@ -137,7 +138,14 @@ def compose_poster(
             )
             blocks.append((font, lines, (255, 255, 255), 14))
 
-        heading = f"{occasion.strip()} at {store_name}".strip()
+        # The model's headline when there is one, so each poster carries its own
+        # line rather than the same "Diwali at <store>" every time. The store
+        # name stays either way: a poster that doesn't say whose it is is an ad
+        # for nobody.
+        if headline and headline.strip():
+            heading = f"{headline.strip()} - {store_name}"
+        else:
+            heading = f"{occasion.strip()} at {store_name}".strip()
         font, lines = _fit(draw, heading, max_text_width, start=46, minimum=26, bold=False)
         blocks.append((font, lines, (255, 236, 209), 8))
 

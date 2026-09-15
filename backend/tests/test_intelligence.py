@@ -211,10 +211,16 @@ def test_every_prompt_carries_the_forbidden_list(db) -> None:
     blocks = [
         prompts.profile_block(context),
         prompts.insights_prompt(context, {"week_sales": 1}),
-        prompts.campaign_caption_prompt(
-            context, occasion="Diwali", products=[], segment_counts={}
+        prompts.campaign_design_prompt(
+            context,
+            occasion="Diwali",
+            offer_text=None,
+            products=[],
+            segment_counts={},
+            recent=[],
+            angle="gifting",
+            style="flat-lay",
         ),
-        prompts.campaign_image_prompt(context, occasion="Diwali", products=[]),
     ]
     for forbidden in context.prompt_profile["forbidden"]:
         for block in blocks:

@@ -88,41 +88,82 @@ def insights_prompt(context: StoreContext, metrics: dict[str, Any]) -> str:
     )
 
 
-def campaign_caption_prompt(
+def campaign_design_prompt(
     context: StoreContext,
     *,
     occasion: str,
+    offer_text: str | None,
     products: list[dict[str, Any]],
     segment_counts: dict[str, int],
+    recent: list[dict[str, str]],
+    angle: str,
+    style: str,
 ) -> str:
+    """One call that designs the whole campaign: headline, caption, tags, picture.
+
+    Asked as a single design task rather than two narrow ones, so the picture
+    and the words come from the same idea - and it costs one request, not two.
+
+    Variety is built in, not hoped for. The model is shown this store's recent
+    campaigns and told not to echo them, and it is handed a creative angle and a
+    photographic style chosen at random for this draft. Without those, the same
+    occasion produced the same post every time.
+    """
     product_lines = (
         "\n".join(
-            f"- {item['name']} (SKU {item['sku']}, {item['qty_on_hand']} "
-            f"{context.unit_label} in stock)"
+            f"- {item['name']} ({item['qty_on_hand']} {context.unit_label} in stock"
+            f"{'; ' + item['why'] if item.get('why') else ''})"
             for item in products
         )
-        or "- no specific product, promote the shop itself"
+        or "- no specific product; promote the shop itself"
     )
+    if offer_text:
+        offer_block = (
+            "THE OFFER (typed by the shopkeeper - a real fact, build the post around it):\n"
+            f"  {offer_text}\n"
+            "Mention this offer in the caption in your own words, keeping its numbers "
+            "exactly as written. Feature the products it is about. Do not add any other "
+            "offer, price or discount."
+        )
+    else:
+        offer_block = (
+            "There is NO offer. Do not mention any discount, price cut, freebie or deal."
+        )
+    if recent:
+        recent_lines = "\n".join(
+            f"- caption: \"{item['caption']}\" | picture: \"{item['visual']}\""
+            for item in recent
+        )
+        recent_block = (
+            "RECENT POSTS FROM THIS SHOP - yours must feel clearly different. Do not reuse "
+            "their opening words, sentence shapes, featured products or picture scene:\n"
+            f"{recent_lines}"
+        )
+    else:
+        recent_block = "This is the shop's first campaign."
+
     return (
         f"{profile_block(context)}\n\n"
-        f"Occasion: {occasion}\n"
-        f"Stock we want to move:\n{product_lines}\n"
-        f"Customer mix: {json.dumps(segment_counts)}\n\n"
-        "Write one social media post for this shop: a caption of at most 45 words and "
-        "5 to 7 hashtags relevant to the shop, the city and the occasion.\n"
-        "Reply with JSON only: {\"caption\": \"...\", \"hashtags\": [\"#...\"]}"
-    )
-
-
-def campaign_image_prompt(
-    context: StoreContext, *, occasion: str, products: list[dict[str, Any]]
-) -> str:
-    names = ", ".join(item["name"] for item in products[:3]) or "the shop counter"
-    return (
-        f"{profile_block(context)}\n\n"
-        f"Describe, in at most 30 words, a photograph for a {occasion} poster for this shop "
-        f"featuring {names}. Describe only what is visible: subject, setting, lighting, colours. "
-        "No text in the image, no logos, no people's faces. Reply with the description only."
+        "You are the creative director for this shop's festival campaign. Think about the "
+        "occasion, the offer and the customers, then design ONE social media post and the "
+        "photograph for its poster.\n\n"
+        f"OCCASION: {occasion}\n\n"
+        f"{offer_block}\n\n"
+        "PRODUCTS YOU MAY FEATURE (pick the 1 to 3 that best fit the offer and occasion):\n"
+        f"{product_lines}\n\n"
+        f"CUSTOMER MIX: {json.dumps(segment_counts)}\n\n"
+        f"CREATIVE ANGLE FOR THIS DRAFT: {angle}\n"
+        f"PHOTO STYLE FOR THIS DRAFT: {style}\n\n"
+        f"{recent_block}\n\n"
+        "Write:\n"
+        "- headline: at most 6 words, catchy, no hashtags\n"
+        "- caption: 25 to 50 words, in the language and tone above, natural, not a list\n"
+        "- hashtags: 5 to 7, relevant to the occasion, the offer, the shop and the city\n"
+        "- visual: at most 40 words describing only what the photograph shows - the "
+        "featured products, the occasion's own cultural details, setting, light and "
+        "colours - in the photo style above. No text, letters, logos or faces in it.\n\n"
+        'Reply with JSON only: {"headline": "...", "caption": "...", '
+        '"hashtags": ["#..."], "visual": "..."}'
     )
 
 

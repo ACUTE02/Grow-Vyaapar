@@ -162,14 +162,16 @@ def _cache_put(digest: str, response: str, db: Any = None) -> None:
 # --------------------------------------------------------------------------- #
 # providers
 # --------------------------------------------------------------------------- #
-def _call_groq(prompt: str, max_tokens: int, timeout: float) -> str | None:
+def _call_groq(
+    prompt: str, max_tokens: int, timeout: float, temperature: float = 0.6
+) -> str | None:
     if not settings.groq_api_key:
         return None
     payload: dict[str, Any] = {
         "model": settings.groq_model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
-        "temperature": 0.6,
+        "temperature": temperature,
     }
     response = httpx.post(
         settings.groq_base_url,
@@ -182,7 +184,9 @@ def _call_groq(prompt: str, max_tokens: int, timeout: float) -> str | None:
     return (data["choices"][0]["message"]["content"] or "").strip() or None
 
 
-def _call_gemini(prompt: str, max_tokens: int, timeout: float) -> str | None:
+def _call_gemini(
+    prompt: str, max_tokens: int, timeout: float, temperature: float = 0.6
+) -> str | None:
     if not settings.gemini_api_key:
         return None
     # The key travels in a header, never in the query string. Google accepts
@@ -195,7 +199,7 @@ def _call_gemini(prompt: str, max_tokens: int, timeout: float) -> str | None:
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "maxOutputTokens": max_tokens + GEMINI_THINKING_RESERVE,
-            "temperature": 0.6,
+            "temperature": temperature,
         },
     }
     response = httpx.post(
@@ -220,7 +224,7 @@ def _call_gemini(prompt: str, max_tokens: int, timeout: float) -> str | None:
     return ("".join(part.get("text", "") for part in parts)).strip() or None
 
 
-PROVIDERS: dict[str, Callable[[str, int, float], str | None]] = {
+PROVIDERS: dict[str, Callable[..., str | None]] = {
     "gemini": _call_gemini,
     "groq": _call_groq,
 }
@@ -275,8 +279,14 @@ def call(
     retries: int | None = None,
     use_cache: bool = True,
     db: Any = None,
+    temperature: float = 0.6,
 ) -> str | None:
-    """Ask a model for text. Returns None if every provider and retry fails."""
+    """Ask a model for text. Returns None if every provider and retry fails.
+
+    `temperature` is 0.6 for anything factual. Creative work - a campaign that
+    should not read like the last one - asks for more, and should also pass
+    use_cache=False, since a cached answer is by definition a repeated one.
+    """
     timeout = timeout if timeout is not None else settings.llm_timeout_seconds
     retries = retries if retries is not None else settings.llm_max_retries
 
@@ -296,7 +306,7 @@ def call(
         for attempt in range(retries + 1):
             limiter().acquire()
             try:
-                text = provider(prompt, max_tokens, timeout)
+                text = provider(prompt, max_tokens, timeout, temperature)
             except Exception as exc:
                 throttled = _is_throttled(exc)
                 logger.warning(
