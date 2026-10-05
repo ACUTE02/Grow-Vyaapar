@@ -25,8 +25,6 @@
 - **An autonomous agent that never sends.** It reads what billing and inventory already produce, decides who to contact and what to promote, and writes only to its own tables. Completing a sale is itself the trigger. Delivery is always an explicit human action.
 - **Models that report their own limits.** Two ML models are trained per store, validated on held-out data, and served only where the evidence supports it.
 
-![System architecture](docs/architecture.png)
-
 ## ✨ Features
 
 ### 🧾 Shop keeping
@@ -54,8 +52,8 @@ A shopkeeper picks an occasion and types an offer; the poster the customer sees 
 | `attribution` | what the last campaign plausibly earned |
 
 ### 📈 Two honest ML models
-- **Stock forecast** — four candidates trained per store, the winner chosen by validation error, but served **only where it beats a predict-the-mean baseline on held-out data**. Where it doesn't, the reorder table falls back to a moving average and says so on screen instead of showing a badge the evidence doesn't support. One of the three seeded stores is in exactly that position. → [model card](docs/model-card-stock-forecast.md)
-- **Churn** — logistic regression per store, self-labelled from history, seeded and reproducible, with metrics and coefficients stored in `model_runs`. Its ROC-AUC sits under the project's own 0.75 target; that is reported rather than tuned away. → [model card](docs/model-card-churn.md)
+- **Stock forecast** — four candidates trained per store, the winner chosen by validation error, but served **only where it beats a predict-the-mean baseline on held-out data**. Where it doesn't, the reorder table falls back to a moving average and says so on screen instead of showing a badge the evidence doesn't support. One of the three seeded stores is in exactly that position.
+- **Churn** — logistic regression per store, self-labelled from history, seeded and reproducible, with metrics and coefficients stored in `model_runs`. Its ROC-AUC sits under the project's own 0.75 target; that is reported rather than tuned away.
 
 ### 🔐 Safety by default
 - JWT auth with bcrypt, role checks and an audit log — enforced in the API, not just the UI
@@ -95,8 +93,6 @@ A shopkeeper picks an occasion and types an offer; the poster the customer sees 
 
 The nightly pass (`backend/scheduler.py`) re-runs the agents; the generated output waits in the Outbox until a person approves it.
 
-![Data model](docs/er-diagram.png)
-
 ## 📁 Project Structure
 
 ```
@@ -124,7 +120,6 @@ Grow-Vyaapar/
 │       ├── app/           # Next.js routes — every page lives under /s/[storeId]
 │       ├── lib/           # api client, Zod schemas, query hooks, session, format
 │       └── components/    # shell, ui primitives, charts, feature components
-├── docs/                  # architecture, model cards, reports, runbooks
 ├── dev.py                 # starts the backend and the web app together
 ├── render.yaml            # Render blueprint
 └── Procfile
@@ -171,8 +166,6 @@ Or start both at once:
 python dev.py
 ```
 
-A full 10-minute click path is in **[docs/demo-guide.md](docs/demo-guide.md)**.
-
 ### ⚙️ Configuration
 
 Copy `.env.example` to `backend/.env`. Every value has a working default; the file is only needed to point at Postgres, switch on an LLM, or deploy.
@@ -193,7 +186,7 @@ The seed is deterministic (`random.seed(42)`): running it twice produces identic
 
 ### 🐳 Docker / Render
 
-A Dockerfile lives in `backend/`, and `render.yaml` describes a web service, a scheduler worker and a managed Postgres database. Secrets are never in the file — the blueprint only names the variables. See [docs/deployment.md](docs/deployment.md).
+A Dockerfile lives in `backend/`, and `render.yaml` describes a web service, a scheduler worker and a managed Postgres database. Secrets are never in the file — the blueprint only names the variables.
 
 ## 🧪 Testing
 
@@ -202,26 +195,7 @@ cd backend && python -m pytest -q          # 406 tests
 cd web && npx tsc --noEmit && npx eslint . && npm run build
 ```
 
-The suite also runs against PostgreSQL — each test in its own schema — by setting `TEST_DATABASE_URL`. It covers cross-tenant isolation, idempotent checkout, the no-vertical-names-outside-`verticals/` rule, and delivery being impossible to trigger from a test. Full results in [docs/testing-report.md](docs/testing-report.md).
-
-## 📚 Documentation
-
-| Where | What |
-|---|---|
-| **[Final project report (PDF)](docs/Grow_Vyaapar_Final_Project_Report.pdf)** | The full report — architecture through to viva prep |
-| [docs/demo-guide.md](docs/demo-guide.md) | A 10-minute click path, and what not to do |
-| [docs/viva-study-guide.md](docs/viva-study-guide.md) | Short answers to the questions an examiner asks |
-| [docs/architecture.md](docs/architecture.md) | Layers, data flow, agent boundaries |
-| [docs/testing-report.md](docs/testing-report.md) | Every measured figure, and the defects found |
-| [docs/model-card-stock-forecast.md](docs/model-card-stock-forecast.md) | The reorder model, its baseline, and why it's switched off for one store |
-| [docs/model-card-churn.md](docs/model-card-churn.md) | Features, labels, metrics, coefficients, limitations |
-| [docs/whatsapp-demo.md](docs/whatsapp-demo.md) | Sending one real WhatsApp reminder for a live demo |
-| [docs/hardening-report.md](docs/hardening-report.md) | Security, accessibility and performance audit |
-| [docs/performance.md](docs/performance.md) | Measured query times, index before/after, N+1 guards |
-| [docs/deployment.md](docs/deployment.md) | Postgres, Docker, Render, backups |
-| [docs/api-guide.md](docs/api-guide.md) | What each of the eleven routers is for |
-| [docs/frontend-architecture.md](docs/frontend-architecture.md) | How the Next.js app is built |
-| [docs/postgres-migration.md](docs/postgres-migration.md) | Moving off SQLite, with rollback |
+The suite also runs against PostgreSQL — each test in its own schema — by setting `TEST_DATABASE_URL`. It covers cross-tenant isolation, idempotent checkout, the no-vertical-names-outside-`verticals/` rule, and delivery being impossible to trigger from a test.
 
 ## ⚠️ Known Gaps, Honestly
 
