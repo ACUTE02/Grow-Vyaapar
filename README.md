@@ -7,7 +7,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-Alembic-D71F00)](https://www.sqlalchemy.org/)
-[![PostgreSQL](https://img.shields.io/badge/SQLite%20%7C%20PostgreSQL-supported-336791?logo=postgresql&logoColor=white)](docs/postgres-migration.md)
+[![PostgreSQL](https://img.shields.io/badge/SQLite%20%7C%20PostgreSQL-supported-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Gemini](https://img.shields.io/badge/Google-Gemini%20API-4285F4?logo=googlegemini&logoColor=white)](https://ai.google.dev/)
 [![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Tests](https://img.shields.io/badge/Tests-406%20passing-brightgreen)](#-testing)
