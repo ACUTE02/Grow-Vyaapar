@@ -1,86 +1,48 @@
-# Grow Vyaapar
+# 🛒 Grow Vyaapar
 
-Billing, inventory and customers for small Indian retail stores, with an
-autonomous marketing agent and two machine-learning models on top.
+**Billing, inventory and customers for small Indian retail stores — with an autonomous marketing agent and two machine-learning models on top, and an honest label on every number the models produce.**
 
-**One codebase runs eight kinds of shop.** They differ only by rows in a config
-table: thresholds, feature flags, product fields, reminder rules, job types,
-loyalty rates and copy tone. There is no `if vertical == ...` anywhere outside
-`backend/app/verticals/` — a test fails the build if a vertical name ever leaks
-into a service, agent, router or model.
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-Alembic-D71F00)](https://www.sqlalchemy.org/)
+[![PostgreSQL](https://img.shields.io/badge/SQLite%20%7C%20PostgreSQL-supported-336791?logo=postgresql&logoColor=white)](docs/postgres-migration.md)
+[![Gemini](https://img.shields.io/badge/Google-Gemini%20API-4285F4?logo=googlegemini&logoColor=white)](https://ai.google.dev/)
+[![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Tests](https://img.shields.io/badge/Tests-406%20passing-brightgreen)](#-testing)
+[![License](https://img.shields.io/badge/License-MIT-yellow)](#-license)
 
-**The marketing agent is autonomous, and it never sends.** It reads what billing
-and inventory already produce, decides who to contact and what to promote, and
-writes only to its own tables. Completing a sale is itself the trigger. Delivery
-is always an explicit human action.
+> The marketing agent decides who to contact and what to promote — and **never sends anything on its own**. The stock forecast is only shown where it measurably beats a naive baseline, and says so on screen where it doesn't.
+
+---
+
+## 📖 Overview
+
+**Grow Vyaapar** is a full-stack point-of-sale and customer-growth platform for small Indian retail businesses. A shopkeeper bills a customer, keeps stock, tracks regulars, and gets a short list of things worth doing this week — all from one app, in the language of their own trade.
+
+- **One codebase, eight kinds of shop.** Grocery, pharmacy, apparel, optical, bakery, cosmetics, electronics and hardware differ only by rows in a config table: thresholds, feature flags, product fields, reminder rules, job types, loyalty rates and copy tone. There is no `if vertical == ...` outside `backend/app/verticals/` — a test fails the build if a vertical name ever leaks into a service, agent, router or model.
+- **An autonomous agent that never sends.** It reads what billing and inventory already produce, decides who to contact and what to promote, and writes only to its own tables. Completing a sale is itself the trigger. Delivery is always an explicit human action.
+- **Models that report their own limits.** Two ML models are trained per store, validated on held-out data, and served only where the evidence supports it.
 
 ![System architecture](docs/architecture.png)
 
----
+## ✨ Features
 
-## Quickstart
+### 🧾 Shop keeping
+- **POS with per-line GST**, stock decrement in a single transaction, sequential invoice numbers and a PDF invoice
+- **Idempotent checkout** — a required `Idempotency-Key` means a retried payment returns the original bill instead of billing twice
+- **Stock adjustments** with a reason code and a full audit trail
+- **Customers** with an append-only record log (prescriptions, measurements)
+- **Vertical-defined catalog**, batches with first-expired-first-out picking, and near-expiry alerts where the trade needs them
+- **Jobs board** for alterations, lens fittings and cake orders
+- **Suppliers, purchase orders** and receiving stock
 
-Python 3.11 or newer.
+### 🎨 Campaign posters
+A shopkeeper picks an occasion and types an offer; the poster the customer sees actually says it. A generated background and the offer text, occasion, store name and address are composited with Pillow, so the words are always legible rather than left to a diffusion model to render. Regenerate before publishing, unpublish to edit, download the result — nothing posts anywhere automatically.
 
-```bash
-git clone <this repo> && cd localai-os
-python -m venv .venv
-```
+### 🤖 Seven agents
 
-Windows PowerShell: `.venv\Scripts\Activate.ps1` · macOS/Linux: `source .venv/bin/activate`
-
-```bash
-pip install -r backend/requirements.txt
-cp .env.example backend/.env
-cd backend
-alembic upgrade head
-python -m scripts.seed
-uvicorn app.main:app --reload
-```
-
-In a second terminal, the web app:
-
-```bash
-cd web
-npm install
-npm run dev
-```
-
-API on <http://127.0.0.1:8000> (`/docs`), app on <http://localhost:3000>.
-Sign in as **`owner@localai.demo`**; the demo password is printed by the seed
-script. No LLM key is needed for any of it.
-
-Or start both at once:
-
-```bash
-.venv\Scripts\python.exe dev.py
-```
-
-Full click path: **[docs/demo-guide.md](docs/demo-guide.md)**.
-
----
-
-## What it does
-
-### Shop keeping
-POS with per-line GST, stock decrement in one transaction, sequential invoice
-numbers and a PDF invoice. **A required `Idempotency-Key` on checkout**, so a
-retried payment returns the original bill instead of billing twice. Stock
-adjustments with a reason code and a full audit trail. Customers with an
-append-only record log (prescriptions, measurements). A catalog whose product
-fields are defined by the vertical. Batches with first-expired-first-out picking
-and near-expiry alerts where the trade needs them. A jobs board for alterations,
-lens fittings and cake orders. Suppliers, purchase orders and receiving stock.
-
-### Campaign posters
-A shopkeeper picks an occasion and types an offer; the poster shown to the
-customer actually says it. A generated background image and the offer text,
-occasion, store name and address are composited on top with Pillow, so the words
-are always legible rather than left to a diffusion model to render. Regenerate
-before publishing, unpublish to make a change, download the result — nothing here
-posts anywhere automatically.
-
-### The agents
 | Agent | Decides |
 |---|---|
 | `segmentation` | who is New, Regular, VIP or Inactive, by this store's thresholds |
@@ -91,128 +53,218 @@ posts anywhere automatically.
 | `forecasting` | what runs out this cycle, and what is going stale |
 | `attribution` | what the last campaign plausibly earned |
 
-### The models
-- **Stock forecast** — four candidates trained per store, the winner chosen by
-  validation error, but served **only where it beats a predict-the-mean baseline
-  on held-out data**. Where it doesn't (measured, not assumed), the reorder table
-  falls back to a moving average and says so on screen instead of showing a badge
-  the evidence doesn't support. One of the three seeded stores is in exactly that
-  position. Full numbers in the
-  [model card](docs/model-card-stock-forecast.md).
-- **Churn** — logistic regression per store, self-labelled from history, seeded
-  and reproducible, with the metrics and coefficients in `model_runs` and an
-  honest [model card](docs/model-card-churn.md). Its ROC-AUC sits under the
-  project's own 0.75 target; that is reported rather than tuned away.
+### 📈 Two honest ML models
+- **Stock forecast** — four candidates trained per store, the winner chosen by validation error, but served **only where it beats a predict-the-mean baseline on held-out data**. Where it doesn't, the reorder table falls back to a moving average and says so on screen instead of showing a badge the evidence doesn't support. One of the three seeded stores is in exactly that position. → [model card](docs/model-card-stock-forecast.md)
+- **Churn** — logistic regression per store, self-labelled from history, seeded and reproducible, with metrics and coefficients stored in `model_runs`. Its ROC-AUC sits under the project's own 0.75 target; that is reported rather than tuned away. → [model card](docs/model-card-churn.md)
 
----
+### 🔐 Safety by default
+- JWT auth with bcrypt, role checks and an audit log — enforced in the API, not just the UI
+- Cross-tenant guards on every store-scoped route, plus sign-in rate limiting
+- `DELIVERY_DAILY_CAP` so a bug cannot spam a real person; the default delivery adapter is `console`
+- The LLM key stays server-side and is never logged or sent to the browser
 
-## Documentation
+## 🏗️ Architecture
 
-| Where | What |
-|---|---|
-| **[docs/Grow_Vyaapar_Final_Project_Report.pdf](docs/Grow_Vyaapar_Final_Project_Report.pdf)** | **The full project report — 36 pages, architecture through to viva prep** |
-| [docs/demo-guide.md](docs/demo-guide.md) | a 10-minute click path, and what not to do |
-| [docs/viva-study-guide.md](docs/viva-study-guide.md) | short answers to the questions an examiner asks |
-| [docs/testing-report.md](docs/testing-report.md) | every measured figure, and the defects this pass found |
-| [docs/architecture.md](docs/architecture.md) | layers, data flow, agent boundaries |
-| [docs/model-card-stock-forecast.md](docs/model-card-stock-forecast.md) | the reorder model, its baseline, and why it's switched off for one store |
-| [docs/model-card-churn.md](docs/model-card-churn.md) | features, labels, metrics, coefficients, limitations |
-| [docs/whatsapp-demo.md](docs/whatsapp-demo.md) | how to send one real WhatsApp reminder for a live demo |
-| [docs/hardening-report.md](docs/hardening-report.md) | the earlier security/accessibility/performance audit |
-| [docs/performance.md](docs/performance.md) | measured query times, the index before/after, N+1 guards |
-| [docs/deployment.md](docs/deployment.md) | Postgres, Docker, Render, backups, what is verified |
-| [docs/api-guide.md](docs/api-guide.md) | what each of the eleven routers is for |
-| [docs/frontend-architecture.md](docs/frontend-architecture.md) | how the Next.js app is built |
-| [docs/postgres-migration.md](docs/postgres-migration.md) | runbook for moving off SQLite, with rollback |
-| `/docs` on a running API | the generated reference |
+```
+                 Shopkeeper (Next.js web app)
+                              │
+                              ▼
+                ┌──────────────────────────┐
+                │   FastAPI  (11 routers)   │   auth · roles · audit · rate limit
+                └─────┬──────────────┬─────┘
+                      │              │
+        ┌─────────────▼───┐    ┌─────▼─────────────────────┐
+        │    Services     │    │          Agents            │
+        │ billing · stock │    │ segmentation · reminders   │
+        │ batches · jobs  │    │ insights · campaigns       │
+        │ loyalty · PDF   │    │ churn · forecasting        │
+        └────────┬────────┘    │ attribution                │
+                 │             └──────┬──────────────┬──────┘
+                 │                    │              │
+                 │             ┌──────▼─────┐  ┌─────▼──────┐
+                 │             │ ML models  │  │ LLM client │  fallback to
+                 │             │ (sklearn)  │  │ Gemini/Groq│  template copy
+                 │             └────────────┘  └────────────┘
+                 ▼
+        ┌─────────────────┐        ┌───────────────────────────┐
+        │ SQLite / Postgres│        │  Delivery adapter          │
+        │  (SQLAlchemy)    │        │  console · Twilio · Cloud  │
+        └─────────────────┘        │  ── human presses Send ──  │
+                                   └───────────────────────────┘
+```
+
+The nightly pass (`backend/scheduler.py`) re-runs the agents; the generated output waits in the Outbox until a person approves it.
 
 ![Data model](docs/er-diagram.png)
 
----
-
-## Layout
+## 📁 Project Structure
 
 ```
-backend/app/verticals/   definitions, loader, StoreContext, attribute validation
-backend/app/models/      config, core, agent, ml, commerce, admin
-backend/app/services/    billing, stock, batches, jobs, coupons, loyalty,
-                         suppliers, delivery, customers, products, invoice PDF
-backend/app/agents/      segmentation, reminders, insights, campaigns,
-                         churn, forecasting, attribution
-backend/app/llm/         one call(), every prompt in one file
-backend/app/delivery/    console (default), Twilio WhatsApp, WhatsApp Cloud
-backend/app/security.py  bcrypt + JWT       app/middleware.py  roles and audit
-backend/scripts/         seed, rehearse, benchmark, backup, diagrams
-backend/scheduler.py     the nightly pass
-web/src/app/             Next.js routes; every page lives under /s/[storeId]
-web/src/lib/             api client, Zod schemas, query hooks, session, format
-web/src/components/      shell, ui primitives, charts, feature components
-dev.py                   starts the backend and the web app together
+Grow-Vyaapar/
+├── backend/
+│   ├── app/
+│   │   ├── verticals/     # definitions (8 JSON files), loader, StoreContext, validation
+│   │   ├── models/        # config, core, agent, ml, commerce, admin
+│   │   ├── services/      # billing, stock, batches, jobs, coupons, loyalty,
+│   │   │                  # suppliers, delivery, customers, products, invoice PDF
+│   │   ├── agents/        # segmentation, reminders, insights, campaigns,
+│   │   │                  # churn, forecasting, attribution
+│   │   ├── routers/       # eleven API routers
+│   │   ├── llm/           # one call(), every prompt in one file
+│   │   ├── delivery/      # console (default), Twilio WhatsApp, WhatsApp Cloud
+│   │   ├── ml/            # stock-forecast model
+│   │   ├── security.py    # bcrypt + JWT
+│   │   └── middleware.py  # roles and audit
+│   ├── alembic/           # migrations
+│   ├── scripts/           # seed, rehearse, benchmark, backup, diagrams
+│   ├── scheduler.py       # the nightly pass
+│   └── tests/
+├── web/
+│   └── src/
+│       ├── app/           # Next.js routes — every page lives under /s/[storeId]
+│       ├── lib/           # api client, Zod schemas, query hooks, session, format
+│       └── components/    # shell, ui primitives, charts, feature components
+├── docs/                  # architecture, model cards, reports, runbooks
+├── dev.py                 # starts the backend and the web app together
+├── render.yaml            # Render blueprint
+└── Procfile
 ```
 
----
+## 🛠️ Tech Stack
 
-## Configuration
+`Python 3.11` · `FastAPI` · `SQLAlchemy` · `Alembic` · `Pydantic` · `APScheduler` · `scikit-learn` · `Pillow` · `WeasyPrint` · `Next.js 16` · `React 19` · `TypeScript` · `Tailwind CSS 4` · `TanStack Query` · `Zod` · `Recharts` · `Google Gemini API` · `Twilio / WhatsApp Cloud API` · `SQLite` · `PostgreSQL` · `Docker`
 
-Copy `.env.example` to `backend/.env`. Every value has a working default; the
-file is only needed to point at Postgres, switch on an LLM, or deploy.
+## 🚀 Local Deployment
+
+Requires Python 3.11 or newer and Node.js.
+
+```bash
+git clone https://github.com/ACUTE02/Grow-Vyaapar.git
+cd Grow-Vyaapar
+python -m venv .venv
+```
+
+Activate the environment — Windows PowerShell: `.venv\Scripts\Activate.ps1` · macOS/Linux: `source .venv/bin/activate`
+
+```bash
+pip install -r backend/requirements.txt
+cp .env.example backend/.env
+cd backend
+alembic upgrade head
+python -m scripts.seed
+uvicorn app.main:app --reload
+```
+
+In a second terminal, start the web app:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+The API runs on <http://127.0.0.1:8000> (reference at `/docs`) and the app on <http://localhost:3000>. Sign in as **`owner@localai.demo`**; the demo password is printed by the seed script. **No LLM key is needed for any of it.**
+
+Or start both at once:
+
+```bash
+python dev.py
+```
+
+A full 10-minute click path is in **[docs/demo-guide.md](docs/demo-guide.md)**.
+
+### ⚙️ Configuration
+
+Copy `.env.example` to `backend/.env`. Every value has a working default; the file is only needed to point at Postgres, switch on an LLM, or deploy.
 
 ```
 DATABASE_URL=sqlite:///./localai.db    # or postgresql+psycopg://...
 AUTH_ENABLED=true                      # enforced in the API, not just the UI
 JWT_SECRET=change-me                   # generate one per environment
-GEMINI_API_KEY=                        # optional; server-side only, never sent to the browser
+GEMINI_API_KEY=                        # optional; server-side only
 DELIVERY_ADAPTER=console               # console | twilio_wa | whatsapp_cloud
 DELIVERY_DAILY_CAP=50                  # a bug cannot spam a real person
 ML_MODEL_DIR=                          # empty means backend/models
 ```
 
-> **Before any demo, check `DELIVERY_ADAPTER=console`.** With `twilio_wa` and
-> real credentials present, pressing Send in the Outbox messages a real phone.
-> The test suite is immune — it blanks every credential — but the running app is
-> not.
+> ⚠️ **Before any demo, check `DELIVERY_ADAPTER=console`.** With `twilio_wa` and real credentials present, pressing Send in the Outbox messages a real phone. The test suite blanks every credential, but the running app does not.
 
-The seed is deterministic (`random.seed(42)`): running it twice produces
-identical data, so a figure quoted in a report is the figure a reviewer sees.
+The seed is deterministic (`random.seed(42)`): running it twice produces identical data, so a figure quoted in a report is the figure a reviewer sees.
 
----
+### 🐳 Docker / Render
 
-## Testing
+A Dockerfile lives in `backend/`, and `render.yaml` describes a web service, a scheduler worker and a managed Postgres database. Secrets are never in the file — the blueprint only names the variables. See [docs/deployment.md](docs/deployment.md).
+
+## 🧪 Testing
 
 ```bash
 cd backend && python -m pytest -q          # 406 tests
 cd web && npx tsc --noEmit && npx eslint . && npm run build
 ```
 
-The suite also runs against PostgreSQL — each test in its own schema — by setting
-`TEST_DATABASE_URL`. See [docs/testing-report.md](docs/testing-report.md) for the
-full results and for how test isolation is enforced.
+The suite also runs against PostgreSQL — each test in its own schema — by setting `TEST_DATABASE_URL`. It covers cross-tenant isolation, idempotent checkout, the no-vertical-names-outside-`verticals/` rule, and delivery being impossible to trigger from a test. Full results in [docs/testing-report.md](docs/testing-report.md).
+
+## 📚 Documentation
+
+| Where | What |
+|---|---|
+| **[Final project report (PDF)](docs/Grow_Vyaapar_Final_Project_Report.pdf)** | The full report — architecture through to viva prep |
+| [docs/demo-guide.md](docs/demo-guide.md) | A 10-minute click path, and what not to do |
+| [docs/viva-study-guide.md](docs/viva-study-guide.md) | Short answers to the questions an examiner asks |
+| [docs/architecture.md](docs/architecture.md) | Layers, data flow, agent boundaries |
+| [docs/testing-report.md](docs/testing-report.md) | Every measured figure, and the defects found |
+| [docs/model-card-stock-forecast.md](docs/model-card-stock-forecast.md) | The reorder model, its baseline, and why it's switched off for one store |
+| [docs/model-card-churn.md](docs/model-card-churn.md) | Features, labels, metrics, coefficients, limitations |
+| [docs/whatsapp-demo.md](docs/whatsapp-demo.md) | Sending one real WhatsApp reminder for a live demo |
+| [docs/hardening-report.md](docs/hardening-report.md) | Security, accessibility and performance audit |
+| [docs/performance.md](docs/performance.md) | Measured query times, index before/after, N+1 guards |
+| [docs/deployment.md](docs/deployment.md) | Postgres, Docker, Render, backups |
+| [docs/api-guide.md](docs/api-guide.md) | What each of the eleven routers is for |
+| [docs/frontend-architecture.md](docs/frontend-architecture.md) | How the Next.js app is built |
+| [docs/postgres-migration.md](docs/postgres-migration.md) | Moving off SQLite, with rollback |
+
+## ⚠️ Known Gaps, Honestly
+
+- **Nothing is deployed.** `render.yaml`, `Procfile` and a Dockerfile exist; monitoring, error tracking and scheduled backups are not running anywhere.
+- **SQLite allows one writer at a time.** Two cashiers billing simultaneously is the first realistic failure. The PostgreSQL runbook is written and the suite already passes there.
+- **Three of eight verticals are seeded.** Grocery, pharmacy and apparel have full trading history; the other five are configured and usable but empty.
+- **Training the ML models is API-only.** Churn and stock-forecast are triggered from `/docs`, not from a button in the app.
+- **Devanagari offer text** renders as empty boxes on a poster until a Noto Sans Devanagari `.ttf` is placed in `backend/assets/fonts/`.
+- **A throttled LLM call produces template copy**, not delayed model copy. A 429 falls back immediately rather than retrying, because on a free tier a refused request still spends the allowance.
+
+### 🚫 Not built, on purpose
+Mobile apps, offline sync, multi-tenant billing, auto-posting to Instagram or Facebook, review sentiment analysis, barcode hardware beyond scanner keyboard input, and anything needing a paid API tier.
+
+## 🤝 Contributing
+
+Contributions are welcome!
+
+1. Fork this repository.
+2. Create a new feature branch.
+3. Commit your changes.
+4. Push to GitHub.
+5. Open a Pull Request.
+
+## ⭐ Support
+
+If you found this project useful:
+
+- ⭐ Star this repository
+- 🍴 Fork this repository
+- 📣 Share it with others
+
+## 📄 License
+
+This project is licensed under the MIT License.
 
 ---
 
-## Known gaps, honestly
+<div align="center">
 
-- **Nothing is deployed.** `render.yaml`, `Procfile` and a Dockerfile exist;
-  monitoring, error tracking and scheduled backups are not running anywhere.
-- **SQLite allows one writer at a time.** Two cashiers billing simultaneously is
-  the first realistic failure. The PostgreSQL runbook is written and the suite
-  already passes there.
-- **Three of eight verticals are seeded.** Grocery, pharmacy and apparel have
-  full trading history; the other five are configured and usable but empty.
-- **Training the ML models is API-only.** Churn and stock-forecast are triggered
-  from `/docs`, not from a button in the app.
-- **Devanagari offer text** renders as empty boxes on a poster until a Noto Sans
-  Devanagari `.ttf` is dropped into `backend/assets/fonts/` — the code already
-  looks there first, nothing else to change.
-- **A throttled LLM call produces template copy, not delayed model copy.** A 429
-  falls back immediately rather than retrying, because on a free tier a refused
-  request still spends the allowance and pushes the reset out — retrying makes
-  the throttle self-sustaining. Falling back fast is right for a request a
-  shopkeeper is waiting on, but it does mean a busy free tier yields template
-  copy more often. A background path could afford to honour the retry hint.
+**🛒 Grow Vyaapar**
 
-## Not built, on purpose
+*Billing, inventory and an agent that helps a small shop grow — without ever sending a message on its own.*
 
-Mobile apps, offline sync, multi-tenant billing, auto-posting to Instagram or
-Facebook (campaigns stop at "published"), review sentiment analysis, barcode
-hardware beyond scanner keyboard input, and anything needing a paid API tier.
+⭐ If this project helped you, don't forget to star the repository!
+
+</div>
